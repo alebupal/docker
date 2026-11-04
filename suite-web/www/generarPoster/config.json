@@ -1,0 +1,24 @@
+{
+    "tmdb": {
+        "api_key": ""
+    },
+    "cache": {
+        "ttl_seconds": 86400
+    },
+    "margin": {
+        "threshold": 18,
+        "percent": 14
+    },
+    "packs": [
+        {
+            "id": "4K_FULL_REMUX",
+            "name": "FULL + REMUX",
+            "tag": "Descarga ambas versiones en 1 clic",
+            "covers": [
+                "4K_FULL",
+                "4K_REMUX"
+            ],
+            "isDefault": true
+        }
+    ]
+}

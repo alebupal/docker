@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="es">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="Generador profesional de carátulas y pósters para colecciones de cine y series.">
+    <title>Generador de Carátulas</title>
+
+    <link rel="stylesheet" href="estilo.css?v=5">
+    <script>
+        (function () {
+            const t = localStorage.getItem('suite_theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
+</head>
+
+<body>
+    <!-- Drag overlay para toda la ventana -->
+    <div id="windowDragOverlay" class="window-drag-overlay">
+        <div class="drag-modal">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <h2>Suelta tu póster aquí</h2>
+            <p>Se cargará instantáneamente en el lienzo</p>
+        </div>
+    </div>
+
+    <!-- Encabezado Principal -->
+    <header class="app-header">
+        <div class="brand">
+            <div class="brand-icon">4K</div>
+            <div class="brand-info">
+                <h1>Generador de Carátulas</h1>
+                <p>Estudio de creación de carátulas</p>
+            </div>
+        </div>
+        <div class="header-badges">
+            <button id="themeToggle" class="btn-theme-toggle" title="Cambiar tema (Claro / Oscuro)"
+                aria-label="Cambiar tema" type="button">
+                <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Contenedor Principal de la Aplicación -->
+    <main class="app-container">
+        <!-- Barra Lateral de Controles -->
+        <aside class="sidebar">
+            <!-- Panel 1: Imagen de Fondo -->
+            <section class="panel" id="panelBackground">
+                <div class="panel-header" data-panel="panelBackground">
+                    <div class="panel-header-left">
+                        <button type="button" class="panel-toggle-btn" aria-label="Plegar o desplegar">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
+                        <span class="panel-title">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                                <polyline points="21 15 16 10 5 21"></polyline>
+                            </svg>
+                            1. Imagen del Póster
+                        </span>
+                    </div>
+                    <span id="imageStatusBadge" class="badge">Sin imagen</span>
+                </div>
+                <div class="panel-body">
+
+
+                    <div class="dropzone" id="dropzone">
+                        <input type="file" id="background-file" class="dropzone-input" accept="image/*">
+                        <div class="dropzone-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                        </div>
+                        <div class="dropzone-text">Arrastra tu imagen o haz clic aquí</div>
+                        <div class="dropzone-subtext">Formatos: JPG, PNG, WebP</div>
+                    </div>
+
+                    <div class="paste-hint">
+                        <span>💡 También puedes pegar con</span>
+                        <span class="kbd">Ctrl</span> + <span class="kbd">V</span>
+                    </div>
+
+                    <div class="url-input-row">
+                        <input type="url" id="posterUrlInput" class="input-field"
+                            placeholder="O pega enlace de imagen..."
+                            style="font-size: 0.8rem; padding: 0.5rem 0.65rem;">
+                        <button type="button" id="btnLoadUrl" class="btn-sm-action">Cargar</button>
+                    </div>
+
+                    <!-- Bloque The Movie Database (TMDb) -->
+                    <div class="tmdb-card-container">
+                        <div class="tmdb-card-header">
+                            <div class="tmdb-badge-brand">
+                                <span class="tmdb-logo-text">TMDB</span>
+                                <span class="tmdb-brand-label">The Movie Database</span>
+                            </div>
+                            <button type="button" class="btn-icon-ghost" id="btnTmdbToggleConfig"
+                                title="Configurar TMDb API Key (opcional)">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path
+                                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                                    </path>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <!-- Configuración de TMDb (API Key, Margen y Mantenimiento de Caché) -->
+                        <!-- Configuración de TMDb (API Key, Margen y Mantenimiento de Caché) -->
+                        <div id="tmdbConfigSection" class="tmdb-config-section" style="display: none;">
+                            <!-- 1. API Key v3 -->
+                            <div class="tmdb-config-card">
+                                <label class="control-label tmdb-config-label">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <path
+                                            d="M21 2l-2 2m-1.5 1.5L16 7l-1.5-1.5L13 7l-2-2 1.5-1.5L11 2 9 4l-7 7a5 5 0 0 0 7 7l7-7 2 2 1.5-1.5L21 11l-1.5-1.5L21 8l-2-2z">
+                                        </path>
+                                    </svg>
+                                    API Key v3 de TMDb
+                                </label>
+                                <div class="url-input-row" style="margin-top: 0.35rem;">
+                                    <input type="password" id="tmdbApiKeyInput" class="input-field"
+                                        placeholder="Pega tu API Key..."
+                                        style="font-size: 0.75rem; padding: 0.45rem 0.6rem; flex: 1;">
+                                    <button type="button" id="btnSaveTmdbKey" class="btn-sm-action">Guardar</button>
+                                </div>
+                            </div>
+
+                            <!-- 2. Filtro de Margen Configurable -->
+                            <div class="tmdb-config-card">
+                                <div class="tmdb-config-card-header">
+                                    <label class="control-label tmdb-config-label" style="margin: 0;">
+                                        🛡️ Filtro de Margen en Carátulas
+                                    </label>
+                                </div>
+
+                                <!-- Slider 1: Tolerancia de Contraste -->
+                                <div class="tmdb-slider-group" style="margin-top: 0.5rem;">
+                                    <div class="tmdb-slider-header">
+                                        <span class="tmdb-slider-title">Sensibilidad / Tolerancia:</span>
+                                        <strong id="marginThresholdVal" class="tmdb-slider-badge">18</strong>
+                                    </div>
+                                    <input type="range" id="tmdbMarginThresholdInput" min="5" max="35" step="1"
+                                        value="18" class="tmdb-range-slider"
+                                        title="Umbral de tolerancia: menor = más estricto, mayor = más permisivo">
+                                    <div class="tmdb-slider-hints">
+                                        <span>Más estricto (5)</span>
+                                        <span>Equilibrado (18)</span>
+                                        <span>Más permisivo (35)</span>
+                                    </div>
+                                </div>
+
+                                <!-- Slider 2: Franja de Detección -->
+                                <div class="tmdb-slider-group" style="margin-top: 0.65rem;">
+                                    <div class="tmdb-slider-header">
+                                        <span class="tmdb-slider-title">Franja Analizada (Borde sup. e inf.):</span>
+                                        <strong id="marginPercentVal" class="tmdb-slider-badge">14%</strong>
+                                    </div>
+                                    <input type="range" id="tmdbMarginPercentInput" min="8" max="25" step="1" value="14"
+                                        class="tmdb-range-slider" title="Porcentaje de altura analizada arriba y abajo">
+                                    <div class="tmdb-slider-hints">
+                                        <span>Fina (8%)</span>
+                                        <span>Recomendada (14%)</span>
+                                        <span>Amplia (25%)</span>
+                                    </div>
+                                </div>
+
+                                <!-- Botón Guardar Filtro debajo de los sliders -->
+                                <button type="button" id="btnSaveMarginConfig"
+                                    class="btn-sm-action tmdb-btn-save-sm"
+                                    title="Guardar tolerancia y franja en config.json">
+                                    💾 Guardar Filtro
+                                </button>
+                            </div>
+
+                            <!-- 3. Control y Limpieza de Caché Local de TMDb -->
+                            <div class="tmdb-config-card tmdb-cache-card">
+                                <div class="tmdb-cache-info">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                                        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                                    </svg>
+                                    <span>Caché en disco:</span>
+                                    <strong id="tmdbCacheStats">0 archivos (0 B)</strong>
+                                </div>
+                                <button type="button" id="btnClearTmdbCache" class="btn-sm-action btn-clear-cache"
+                                    title="Vaciar archivos temporales de TMDb en cache/">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <polyline points="3 6 5 6 21 6"></polyline>
+                                        <path
+                                            d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
+                                        </path>
+                                    </svg>
+                                    <span>Limpiar Caché</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Pestañas de modo -->
+                        <div class="tmdb-mode-tabs">
+                            <button type="button" class="tmdb-mode-tab active" id="tabTmdbDirect">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2.5">
+                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                                </svg>
+                                ID / Enlace
+                            </button>
+                            <button type="button" class="tmdb-mode-tab" id="tabTmdbSearch">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2.5">
+                                    <circle cx="11" cy="11" r="8"></circle>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                </svg>
+                                Buscar
+                            </button>
+                            <button type="button" class="tmdb-mode-tab" id="tabTmdbBatch" title="Importar varios IDs de TMDb en bloque">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2.5">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                                </svg>
+                                Lote / Bloque
+                            </button>
+                        </div>
+
+                        <!-- Vista 1: ID o Enlace directo -->
+                        <div id="tmdbDirectView" class="tmdb-view">
+                            <div class="url-input-row" style="margin-top: 0.35rem;">
+                                <input type="text" id="tmdbInput" class="input-field"
+                                    placeholder="ID (ej: 969681) o enlace TMDb..."
+                                    style="font-size: 0.8rem; padding: 0.5rem 0.65rem; flex: 1;">
+                                <button type="button" id="btnFetchTmdb" class="btn-sm-action tmdb-btn-glow"
+                                    style="display: flex; align-items: center; gap: 0.35rem;">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2.5">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="7 10 12 15 17 10"></polyline>
+                                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                                    </svg>
+                                    <span>Importar</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Vista 2: Búsqueda por título -->
+                        <div id="tmdbSearchView" class="tmdb-view" style="display: none;">
+                            <div class="url-input-row" style="margin-top: 0.35rem;">
+                                <input type="text" id="tmdbSearchInput" class="input-field"
+                                    placeholder="Buscar película o serie..."
+                                    style="font-size: 0.8rem; padding: 0.5rem 0.65rem; flex: 1;">
+                                <button type="button" id="btnSearchTmdb"
+                                    class="btn-sm-action tmdb-btn-glow">Buscar</button>
+                            </div>
+                            <div id="tmdbSearchResults" class="tmdb-search-dropdown" style="display: none;"></div>
+                        </div>
+
+                        <!-- Vista 3: Lote de IDs o Enlaces -->
+                        <div id="tmdbBatchView" class="tmdb-view" style="display: none;">
+                            <div style="margin-top: 0.35rem;">
+                                <textarea id="tmdbBatchInput" class="input-field" rows="3"
+                                    placeholder="Pega varios IDs o enlaces de TMDb (uno por línea o separados por comas):&#10;969681&#10;157336&#10;550"
+                                    style="font-size: 0.76rem; font-family: monospace; width: 100%; min-height: 70px; resize: vertical; padding: 0.45rem; line-height: 1.35;"></textarea>
+                                <div style="display: flex; gap: 0.4rem; margin-top: 0.4rem;">
+                                    <button type="button" id="btnStartBatch" class="btn-sm-action tmdb-btn-glow" style="flex: 1; justify-content: center; padding: 0.42rem 0.6rem;">
+                                        🚀 Iniciar Lote (<span id="batchCountBadge">0</span>)
+                                    </button>
+                                    <button type="button" id="btnClearBatchInput" class="btn-sm-action" style="padding: 0.42rem 0.55rem; background: rgba(255,255,255,0.06);">
+                                        Limpiar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Barra de control del lote activo -->
+                        <div id="tmdbBatchNavigator" class="tmdb-batch-nav" style="display: none;">
+                            <div class="batch-nav-top">
+                                <div class="batch-badge">
+                                    <span class="batch-dot"></span>
+                                    Lote: <strong id="batchCurrentIndex">1</strong> / <strong id="batchTotalCount">0</strong>
+                                </div>
+                                <button type="button" id="btnCloseBatch" class="btn-icon-ghost" title="Salir del modo lote" style="padding: 0.15rem 0.45rem; font-size: 0.75rem; color: var(--text-muted);">✕ Salir</button>
+                            </div>
+                            <div class="batch-current-title" id="batchCurrentTitle">Cargando contenido...</div>
+                            <div class="batch-nav-buttons">
+                                <button type="button" id="btnBatchPrev" class="btn-sm-action" style="flex: 1; justify-content: center; font-size: 0.72rem; padding: 0.35rem 0.5rem;">
+                                    ◀ Anterior
+                                </button>
+                                <button type="button" id="btnBatchNext" class="btn-sm-action" style="flex: 1; justify-content: center; font-size: 0.72rem; padding: 0.35rem 0.5rem;">
+                                    Siguiente ▶
+                                </button>
+                            </div>
+                            <div class="batch-queue-dropdown" id="batchQueueList"></div>
+                        </div>
+
+                        <!-- Botón para reabrir modal con todas las carátulas encontradas -->
+                        <button type="button" id="btnReopenTmdbModal" class="btn-sm-action"
+                            style="display: none; margin-top: 0.65rem; width: 100%; justify-content: center; background: rgba(1, 180, 228, 0.15); border-color: rgba(1, 180, 228, 0.4); color: #01b4e4; padding: 0.5rem;">
+                            🖼️ Ver opciones de carátula (<span id="reopenTmdbCount">0</span>)
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+
+            <!-- Panel 2: Selección de Carátula -->
+            <section class="panel collapsed" id="panelCovers">
+                <div class="panel-header" data-panel="panelCovers">
+                    <div class="panel-header-left">
+                        <button type="button" class="panel-toggle-btn" aria-label="Plegar o desplegar">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
+                        <span class="panel-title">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                                <polyline points="2 17 12 22 22 17"></polyline>
+                                <polyline points="2 12 12 17 22 12"></polyline>
+                            </svg>
+                            2. Banner de Carátula & Packs
+                        </span>
+                    </div>
+                    <button type="button" id="btnOpenCoverManager" class="badge btn-badge-action"
+                        title="Gestionar carátulas y packs">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M12 20h9"></path>
+                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                        </svg>
+                        Gestionar
+                    </button>
+                </div>
+                <div class="panel-body">
+
+                    <!-- Subsección: Packs de Descarga -->
+                    <div class="panel-subgroup-header">
+                        <span class="subgroup-title">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path
+                                    d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+                                </path>
+                                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                            </svg>
+                            Packs de Descarga (1 Clic)
+                        </span>
+                        <span class="subgroup-badge">Multiversión</span>
+                    </div>
+                    <div class="cover-grid packs-grid" id="packsGrid"></div>
+
+                    <!-- Subsección: Banners Individuales -->
+                    <div class="panel-subgroup-header" style="margin-top: 1.15rem;">
+                        <span class="subgroup-title">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <line x1="3" y1="9" x2="21" y2="9"></line>
+                                <line x1="9" y1="21" x2="9" y2="9"></line>
+                            </svg>
+                            Banners Individuales
+                        </span>
+                        <span class="subgroup-badge">1 a 1</span>
+                    </div>
+                    <div class="cover-grid" id="coverGrid">
+                        <div class="cover-card active" data-cover="ninguno">
+                            <div class="cover-card-title">Ninguno</div>
+                            <div class="cover-card-tag">Póster limpio</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+
+            <!-- Panel 3: Ajustes de Escala y Posición -->
+            <section class="panel collapsed" id="panelFilters">
+                <div class="panel-header" data-panel="panelFilters">
+                    <div class="panel-header-left">
+                        <button type="button" class="panel-toggle-btn" aria-label="Plegar o desplegar">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
+                        <span class="panel-title">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="3"></circle>
+                                <path
+                                    d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                                </path>
+                            </svg>
+                            3. Transformación & Filtros
+                        </span>
+                    </div>
+                    <button id="btnResetFilters" class="badge" style="cursor: pointer;"
+                        title="Restablecer todos los ajustes">Reset</button>
+                </div>
+                <div class="panel-body">
+
+
+                    <!-- Escala -->
+                    <div class="control-group">
+                        <div class="control-label-row">
+                            <label for="back-scale">Escala del Póster</label>
+                            <span id="scaleVal" class="control-value">100%</span>
+                        </div>
+                        <div class="slider-container">
+                            <input type="range" min="0.3" max="3" step="0.01" value="1" id="back-scale">
+                        </div>
+                    </div>
+
+                    <!-- Botones de Centrado rápido y Transformación -->
+                    <div class="btn-grid">
+                        <button type="button" class="btn-tool" id="btnCenterImage" title="Centrar imagen en el lienzo">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+                                <line x1="12" y1="2" x2="12" y2="6"></line>
+                                <line x1="12" y1="18" x2="12" y2="22"></line>
+                                <line x1="2" y1="12" x2="6" y2="12"></line>
+                                <line x1="18" y1="12" x2="22" y2="12"></line>
+                            </svg>
+                            Centrar
+                        </button>
+                        <button type="button" class="btn-tool" id="btnFitWidth"
+                            title="Ajustar imagen al ancho del lienzo">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="2" y1="12" x2="22" y2="12"></line>
+                                <polyline points="6 8 2 12 6 16"></polyline>
+                                <polyline points="18 8 22 12 18 16"></polyline>
+                            </svg>
+                            Ajustar Ancho
+                        </button>
+                        <button type="button" class="btn-tool" id="btnFitHeight"
+                            title="Ajustar imagen al alto del lienzo">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="2" x2="12" y2="22"></line>
+                                <polyline points="8 6 12 2 16 6"></polyline>
+                                <polyline points="8 18 12 22 16 18"></polyline>
+                            </svg>
+                            Ajustar Alto
+                        </button>
+                        <button type="button" class="btn-tool" id="btnFlipH" title="Invertir horizontalmente (Espejo)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="7 8 3 12 7 16"></polyline>
+                                <polyline points="17 8 21 12 17 16"></polyline>
+                                <line x1="12" y1="4" x2="12" y2="20"></line>
+                            </svg>
+                            Voltear H
+                        </button>
+                        <button type="button" class="btn-tool" id="btnFlipV" title="Invertir verticalmente">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="8 7 12 3 16 7"></polyline>
+                                <polyline points="8 17 12 21 16 17"></polyline>
+                                <line x1="4" y1="12" x2="20" y2="12"></line>
+                            </svg>
+                            Voltear V
+                        </button>
+                        <button type="button" class="btn-tool" id="btnRotate90" title="Girar 90 grados">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 4 23 10 17 10"></polyline>
+                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                            </svg>
+                            Girar 90°
+                        </button>
+                    </div>
+
+                    <!-- Fondo con Desenfoque Dinámico -->
+                    <label class="toggle-row" for="toggleBlurBg">
+                        <div class="toggle-label">
+                            <span class="toggle-title">Fondo con Desenfoque</span>
+                            <span class="toggle-desc">Rellena bandas con el póster desenfocado</span>
+                        </div>
+                        <div class="switch">
+                            <input type="checkbox" id="toggleBlurBg">
+                            <span class="slider-round"></span>
+                        </div>
+                    </label>
+
+                    <!-- Filtros fotográficos -->
+                    <div class="control-group" style="margin-top: 1.25rem;">
+                        <div class="control-label-row">
+                            <label for="filterBrightness">Brillo</label>
+                            <span id="brightnessVal" class="control-value">100%</span>
+                        </div>
+                        <div class="slider-container">
+                            <input type="range" min="50" max="150" step="1" value="100" id="filterBrightness">
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <div class="control-label-row">
+                            <label for="filterContrast">Contraste</label>
+                            <span id="contrastVal" class="control-value">100%</span>
+                        </div>
+                        <div class="slider-container">
+                            <input type="range" min="50" max="150" step="1" value="100" id="filterContrast">
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <div class="control-label-row">
+                            <label for="filterSaturation">Saturación</label>
+                            <span id="saturationVal" class="control-value">100%</span>
+                        </div>
+                        <div class="slider-container">
+                            <input type="range" min="0" max="200" step="1" value="100" id="filterSaturation">
+                        </div>
+                    </div>
+
+                    <!-- Botón Comparador con Original -->
+                    <button type="button" class="btn-preview-original" id="btnHoldPreview"
+                        title="Mantén presionado para ver la imagen original">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        Mantener para ver original
+                    </button>
+                </div>
+            </section>
+
+
+            <!-- Panel 4: Exportación (Siempre Visible) -->
+            <section class="panel" id="panelExport">
+                <div class="panel-header" data-panel="panelExport">
+                    <div class="panel-header-left">
+                        <button type="button" class="panel-toggle-btn" aria-label="Plegar o desplegar">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
+                        <span class="panel-title">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            4. Exportar Carátula
+                        </span>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <div class="control-group">
+                        <label class="control-label-row" for="outputFilename">Nombre de la película y año</label>
+                        <input type="text" id="outputFilename" class="input-field" placeholder="Ej: Oppenheimer (2023)">
+                    </div>
+
+                    <div class="control-group">
+                        <div class="control-label-row">Formato de salida (JPG por defecto)</div>
+                        <div class="format-pills" id="formatSelector">
+                            <div class="format-pill active" data-format="image/jpeg" data-ext="jpg">JPEG (JPG)</div>
+                            <div class="format-pill" data-format="image/png" data-ext="png">PNG</div>
+                            <div class="format-pill" data-format="image/webp" data-ext="webp">WebP</div>
+                        </div>
+                    </div>
+
+                    <div class="control-group" id="qualityControl">
+                        <div class="control-label-row">
+                            <label for="outputQuality">Calidad</label>
+                            <span id="qualityVal" class="control-value">95%</span>
+                        </div>
+                        <div class="slider-container">
+                            <input type="range" min="0.6" max="1.0" step="0.05" value="0.95" id="outputQuality">
+                        </div>
+                    </div>
+
+                    <div class="export-buttons-group" style="display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.85rem;">
+                        <!-- Botón para modo lote: Guardar y avanzar a la siguiente -->
+                        <button type="button" id="btnBatchSaveAndNext" class="btn-primary btn-batch-save-next" style="display: none;"
+                            title="Guarda la carátula actual en cover_download/ y carga automáticamente la siguiente película del lote">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <polygon points="5 4 15 12 5 20 5 4"></polygon>
+                                <line x1="19" y1="5" x2="19" y2="19"></line>
+                            </svg>
+                            <span>⏩ Guardar en Carpeta y Siguiente</span>
+                        </button>
+
+                        <!-- Botón 1: Guardar en Carpeta cover_download/ (Servidor / Local) -->
+                        <button type="button" id="btnSaveToFolder" class="btn-primary btn-save-folder"
+                            title="Guarda automáticamente la carátula en el directorio cover_download/, reemplazando si ya existe">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                                <polyline points="9 14 12 11 15 14"></polyline>
+                                <line x1="12" y1="11" x2="12" y2="17"></line>
+                            </svg>
+                            <span>📁 Guardar en Carpeta (cover_download)</span>
+                        </button>
+
+                        <!-- Botón 2: Guardar en Local (Pregunta dónde guardar en el equipo) -->
+                        <button type="button" id="btnSaveLocal" class="btn-action secondary btn-save-local"
+                            title="Abre el selector de guardado del navegador para elegir dónde guardarla en tu disco">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            <span>💾 Guardar en Local (Elegir destino)</span>
+                        </button>
+
+                        <!-- Botón Copiar al Portapapeles -->
+                        <button type="button" id="copyClipboard" class="btn-clipboard" title="Copiar carátula actual directamente al portapapeles">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                            <span>Copiar al Portapapeles</span>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+        </aside>
+
+        <!-- Área Central del Editor y Lienzo -->
+        <section class="canvas-stage">
+            <div class="stage-toolbar">
+                <div class="stage-info">
+                    <span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                        </svg>
+                        Lienzo: <strong>670 × 998 px</strong>
+                    </span>
+                    <span id="zoomIndicator">
+                        Zoom: <strong id="zoomLevel">100%</strong>
+                    </span>
+                </div>
+                <div class="stage-controls">
+                    <button class="icon-btn" id="btnZoomOut" title="Reducir zoom de visualización">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            <line x1="8" y1="11" x2="14" y2="11"></line>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" id="btnZoomFit" title="Ajustar a la ventana">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path
+                                d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3">
+                            </path>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" id="btnZoomIn" title="Aumentar zoom de visualización">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            <line x1="11" y1="8" x2="11" y2="14"></line>
+                            <line x1="8" y1="11" x2="14" y2="11"></line>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="canvas-viewport" id="canvasViewport">
+                <div class="canvas-wrapper" id="canvasWrapper">
+                    <canvas id="target" width="670" height="998"></canvas>
+                </div>
+                <div class="canvas-overlay-guide">
+                    <span>🖱️ <strong>Arrastrar</strong> para mover</span> •
+                    <span>🎡 <strong>Rueda</strong> para zoom</span> •
+                    <span>⌨️ <strong>Flechas</strong> para ajuste fino</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Contenedor de Toasts -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Modal de Gestión de Carátulas (File System Access API) -->
+    <!-- Modal de Gestión de Carátulas & Packs -->
+    <div class="modal-overlay" id="coverManagerModal" style="display: none;">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-header-info">
+                    <div class="modal-icon-badge">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z">
+                            </path>
+                        </svg>
+                    </div>
+                    <div>
+                        <h2 class="modal-title">Gestión de Carátulas & Packs</h2>
+                        <p class="modal-subtitle">Administra archivos en <code>cover/</code> y crea packs de descarga en
+                            1 clic</p>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" id="btnCloseCoverManager"
+                    aria-label="Cerrar modal">&times;</button>
+            </div>
+
+            <!-- Pestañas de Navegación -->
+            <div class="modal-tabs">
+                <button type="button" class="modal-tab-btn active" id="tabCoversBtn">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    Carátulas Disponibles
+                </button>
+                <button type="button" class="modal-tab-btn" id="tabPacksBtn">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon
+                            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2">
+                        </polygon>
+                    </svg>
+                    ✨ Packs de Descarga (1 Clic)
+                </button>
+            </div>
+
+            <!-- Pestaña 1: Carátulas -->
+            <div id="tabCoversContent">
+                <!-- Barra de Estado / Acciones -->
+                <div class="fs-status-bar" id="fsStatusBar">
+                    <div class="fs-status-info">
+                        <span>Carátulas disponibles para aplicar a los pósters</span>
+                    </div>
+                    <div class="fs-status-actions">
+                        <label class="btn-action success" id="btnUploadCoverLabel" style="cursor: pointer;">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                            Subir Nueva Carátula (.png, .webp)
+                            <input type="file" id="coverUploadInput" accept="image/png, image/webp, image/jpeg"
+                                style="display: none;">
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Contenedor del listado de carátulas -->
+                <div class="modal-body">
+                    <div id="coverManagerContent" class="cover-manager-grid">
+                        <!-- Se inyecta dinámicamente -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pestaña 2: Packs de Descarga -->
+            <div id="tabPacksContent" style="display: none;">
+                <div class="fs-status-bar">
+                    <div class="fs-status-info">
+                        <span>Packs para descargar <strong>múltiples carátulas simultáneamente</strong> en 1 clic</span>
+                    </div>
+                    <div class="fs-status-actions">
+                        <button type="button" class="btn-action primary" id="btnToggleNewPack">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                            + Crear Nuevo Pack
+                        </button>
+                    </div>
+                </div>
+
+                <div class="modal-body">
+                    <!-- Formulario Nuevo Pack (desplegable) -->
+                    <div id="newPackBox" class="new-pack-box" style="display: none;">
+                        <h3 style="font-size:0.95rem; font-weight:700; color:var(--text-main); margin:0;">Nuevo Pack
+                            Personalizado</h3>
+                        <div>
+                            <label
+                                style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:0.35rem;"
+                                for="newPackName">Nombre del Pack</label>
+                            <input type="text" id="newPackName" class="input-field"
+                                placeholder="Ej: Pack 4K UHD + BDCORE">
+                        </div>
+                        <div>
+                            <span
+                                style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:0.35rem;">Selecciona
+                                las carátulas que incluirá el pack:</span>
+                            <div id="packCoversPicker" class="pack-covers-picker">
+                                <!-- Checkboxes generados dinámicamente -->
+                            </div>
+                        </div>
+                        <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:0.5rem;">
+                            <button type="button" class="btn-action secondary" id="btnCancelNewPack">Cancelar</button>
+                            <button type="button" class="btn-action success" id="btnSaveNewPack">Guardar Pack</button>
+                        </div>
+                    </div>
+
+                    <!-- Lista de Packs existentes -->
+                    <div id="packsListContainer" class="packs-container" style="margin-top: 1rem;">
+                        <!-- Se inyecta dinámicamente -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <span class="modal-hint">💡 Modifica archivos físicos en <code>cover/</code> o crea packs personalizados
+                    para tu flujo de trabajo.</span>
+                <button type="button" class="btn-action secondary" id="btnCloseModalFooter">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Selección de Carátulas Oficiales TMDb -->
+    <div class="modal-overlay" id="tmdbPostersModal" style="display: none;">
+        <div class="modal-card tmdb-modal-card">
+            <div class="modal-header">
+                <div class="modal-header-info">
+                    <div class="modal-icon-badge tmdb-badge-icon">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+                            <line x1="7" y1="2" x2="7" y2="22"></line>
+                            <line x1="17" y1="2" x2="17" y2="22"></line>
+                            <line x1="2" y1="12" x2="22" y2="12"></line>
+                            <line x1="2" y1="7" x2="7" y2="7"></line>
+                            <line x1="2" y1="17" x2="7" y2="17"></line>
+                            <line x1="17" y1="17" x2="22" y2="17"></line>
+                            <line x1="17" y1="7" x2="22" y2="7"></line>
+                        </svg>
+                    </div>
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                            <h2 class="modal-title" id="tmdbModalTitle">Pósters de TMDb</h2>
+                            <span id="tmdbModalCountBadge" class="badge">0 disponibles</span>
+                        </div>
+                        <p class="modal-subtitle" id="tmdbModalSubtitle">Elige la carátula que prefieras; se ajustará
+                            automáticamente al lienzo</p>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" id="btnCloseTmdbModal"
+                    aria-label="Cerrar modal">&times;</button>
+            </div>
+
+            <!-- Filtros por idioma y margen para cover -->
+            <div class="modal-tabs tmdb-filter-tabs">
+                <button type="button" class="modal-tab-btn active" data-filter="all" id="filterTmdbAll">
+                    Todos (<span id="countAll">0</span>)
+                </button>
+                <button type="button" class="modal-tab-btn" data-filter="es-es" id="filterTmdbEsEs">
+                    🇪🇸 España (<span id="countEsEs">0</span>)
+                </button>
+                <button type="button" class="modal-tab-btn" data-filter="es-mx" id="filterTmdbEsMx">
+                    🇲🇽 Latino (<span id="countEsMx">0</span>)
+                </button>
+                <button type="button" class="modal-tab-btn" data-filter="en" id="filterTmdbEn">
+                    🇬🇧 Inglés (<span id="countEn">0</span>)
+                </button>
+                <button type="button" class="modal-tab-btn" data-filter="margin" id="filterTmdbMargin"
+                    title="Pósters con espacio libre arriba y abajo para que el banner no corte detalles">
+                    🛡️ Con margen (<span id="countMargin">0</span>)
+                </button>
+                <button type="button" class="modal-tab-btn" data-filter="textless" id="filterTmdbTextless">
+                    ✨ Sin texto (<span id="countTextless">0</span>)
+                </button>
+            </div>
+
+            <div class="modal-body tmdb-modal-body" id="tmdbModalBody">
+                <div id="tmdbModalGrid" class="tmdb-posters-grid">
+                    <!-- Se inyectan las carátulas ordenadas dinámicamente -->
+                </div>
+                <div id="tmdbModalEmpty" class="tmdb-empty-state" style="display: none;">
+                    <p>No se encontraron carátulas para el filtro seleccionado.</p>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <span class="modal-hint">💡 Priorizadas en español primero, luego inglés y sin texto. Haz clic en
+                    cualquiera para aplicarla directamente.</span>
+                <button type="button" class="btn-action secondary" id="btnCloseTmdbModalFooter">Cerrar</button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js?v=5"></script>
+</body>
+
+</html>

@@ -1,0 +1,16 @@
+services:
+  musicgrabber:
+    image: g33kphr33k/musicgrabber:latest
+    container_name: musicgrabber
+    hostname: musicgrabber
+    restart: unless-stopped
+    shm_size: '2gb'
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Madrid
+    ports:
+      - "38274:8080"
+    volumes:
+      - ${DOWNLOADS_DIR}:/music
+      - ./data:/data

@@ -1,0 +1,32 @@
+services:
+  backrest:
+    image: ghcr.io/garethgeorge/backrest:latest
+    container_name: backrest
+    hostname: backrest
+    restart: unless-stopped
+
+    environment:
+      BACKREST_DATA: /data
+      BACKREST_CONFIG: /config/config.json
+      XDG_CACHE_HOME: /cache
+      TMPDIR: /tmp
+      TZ: Europe/Madrid
+
+    ports:
+      # Acceso web en red local (LAN) y para el widget de Homepage
+      - "9898:9898"
+
+    volumes:
+      - ./data:/data
+      - ./config:/config
+      - ./cache:/cache
+      - ./tmp:/tmp
+
+      # Origen: solo lectura.
+      - ${PERSONAL_DIR}:/userdata/personal:ro
+
+      # Destino de los repositorios Restic.
+      - ${BACKUP_REPOS_DIR}:/repos
+
+    security_opt:
+      - no-new-privileges:true

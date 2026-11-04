@@ -1,0 +1,48 @@
+# =============================================================================
+# 1. Regla general para subcarpetas: ignorar TODO salvo config.sh y docker-compose.yml
+# =============================================================================
+*/*
+!*/config.sh
+!*/docker-compose.yml
+
+# =============================================================================
+# 2. Excepción: apk-builder (scripts y Dockerfile del compilador, sin output/)
+# =============================================================================
+!apk-builder/Dockerfile
+!apk-builder/entrypoint.sh
+!apk-builder/generar-apk.sh
+!apk-builder/README.md
+apk-builder/output/
+
+# =============================================================================
+# 3. Excepción: suite-web (configuración nginx/php y código web limpio)
+# =============================================================================
+!suite-web/nginx/
+!suite-web/nginx/**
+!suite-web/php/
+!suite-web/php/**
+!suite-web/www/
+!suite-web/www/**
+
+# Excluir archivos pesados, cachés, descargas y generador privado dentro de suite-web/www/
+suite-web/www/generarPassword/
+suite-web/www/generarPoster.zip
+suite-web/www/generarPoster/cache/
+suite-web/www/generarPoster/cover_download/
+suite-web/www/generarPoster/cover/*.psd
+suite-web/www/generarPoster/cover/*.pdf
+suite-web/www/descargas/descargas/
+suite-web/www/descargas/tree.json
+suite-web/www/descargas/tree-data.js
+
+# =============================================================================
+# 4. Archivos ocultos y temporales en la raíz
+# =============================================================================
+.env
+.user_home
+*.swp
+*.swo
+*~
+.DS_Store
+.idea/
+.vscode/

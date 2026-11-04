@@ -1,0 +1,18 @@
+services:
+  convertx:
+    image: ghcr.io/c4illin/convertx:latest
+    container_name: convertx
+    hostname: convertx
+    restart: unless-stopped
+    ports:
+      - "3005:3000"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Madrid
+      - JWT_SECRET=${JWT_SECRET}
+      - ACCOUNT_REGISTRATION=true
+      - HTTP_ALLOWED=true
+      - AUTO_DELETE_EVERY_N_HOURS=24
+    volumes:
+      - ./data:/app/data

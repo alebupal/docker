@@ -1,0 +1,15 @@
+services:
+  termix:
+    image: ghcr.io/termix-ssh/termix:latest
+    container_name: termix
+    hostname: termix
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+    environment:
+      - PORT=8080
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Madrid
+    volumes:
+      - ./data:/app/data

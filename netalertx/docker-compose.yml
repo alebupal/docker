@@ -1,0 +1,23 @@
+services:
+  netalertx:
+    container_name: netalertx
+    image: ghcr.io/netalertx/netalertx:latest
+    restart: unless-stopped
+    network_mode: host
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETUID
+      - SETGID
+    environment:
+      - TZ=Europe/Madrid
+      - PORT=20211
+    volumes:
+      - ./data:/data:rw
+      - /etc/localtime:/etc/localtime:ro
+    tmpfs:
+      - /tmp:uid=20211,gid=20211,mode=1700,rw,noexec,nosuid,nodev,async,noatime,nodiratime

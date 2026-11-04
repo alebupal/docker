@@ -1,0 +1,14 @@
+services:
+  filebrowser:
+    container_name: filebrowser
+    image: ghcr.io/gtsteffaniak/filebrowser:stable
+    restart: unless-stopped
+    user: "0:0"
+    ports:
+      - "8082:80"
+    volumes:
+      - /:/sistema:rw
+      - ${PERSONAL_DIR}:/sistema${PERSONAL_DIR}:rw
+      - ${BACKUP_DIR}:/sistema${BACKUP_DIR}:rw
+      - ${MULTIMEDIA_DIR}:/sistema${MULTIMEDIA_DIR}:rw
+      - ./data:/home/filebrowser/data

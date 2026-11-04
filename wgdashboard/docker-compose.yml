@@ -1,0 +1,20 @@
+services:
+  wgdashboard:
+    image: ghcr.io/wgdashboard/wgdashboard:latest
+    container_name: wgdashboard
+    hostname: wgdashboard
+    restart: unless-stopped
+    ports:
+      - "10086:10086/tcp"      # Web UI de WGDashboard
+      - "51820:51820/udp"      # Puerto WireGuard VPN estándar
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      - TZ=Europe/Madrid
+    volumes:
+      - ./data/wireguard:/etc/wireguard
+      - ./data/db:/data
