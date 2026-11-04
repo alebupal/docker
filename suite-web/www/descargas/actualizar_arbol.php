@@ -44,7 +44,8 @@ function scanDirectoryRecursively($dir, $relativePrefix = '') {
         '.gitignore',
         '.git',
         '.DS_Store',
-        'favicon.ico'
+        'favicon.ico',
+        'README.md'
     ];
 
     if (!is_dir($dir)) return [];
@@ -113,7 +114,7 @@ function generarArbolDescargas() {
     $excluidos = [
         'actualizar_arbol.php', 'actualizar_arbol.sh', 'estilo.css', 'index.html',
         'index.php', 'script.js', 'tree.json', 'tree-data.js', '404.html',
-        '.htaccess', '.gitignore', '.git', '.DS_Store', 'favicon.ico', 'descargas'
+        '.htaccess', '.gitignore', '.git', '.DS_Store', 'favicon.ico', 'README.md', 'descargas'
     ];
 
     if ($itemsRaiz !== false) {

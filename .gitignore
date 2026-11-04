@@ -17,6 +17,7 @@ apk-builder/output/
 # =============================================================================
 # 3. Excepción: suite-web (configuración nginx/php y código web limpio)
 # =============================================================================
+!suite-web/README.md
 !suite-web/nginx/
 !suite-web/nginx/**
 !suite-web/php/
