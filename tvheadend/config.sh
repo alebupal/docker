@@ -9,7 +9,7 @@ IMAGE="ghcr.io/linuxserver/tvheadend:latest"
 PORTS=""
 VOLUMES="
 -v ${USER_HOME}/config:/config
--v ${USER_HOME}/grabaciones:/recordings
+-v ${RECORDINGS_DIR}:/recordings
 -v ${USER_HOME}/picons:/picons
 "
 
