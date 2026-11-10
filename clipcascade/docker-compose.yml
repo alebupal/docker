@@ -1,0 +1,22 @@
+# ClipCascade: portapapeles sincronizado entre dispositivos (https://github.com/Sathvik-Rao/ClipCascade)
+# ⚠️ Usuario inicial admin / admin123: cámbialo en el primer acceso.
+# Los clientes (Android/escritorio) deben estar en una versión compatible con el servidor.
+services:
+  clipcascade:
+    image: sathvikrao/clipcascade:latest
+    container_name: clipcascade
+    restart: unless-stopped
+    ports:
+      - "8089:8080"
+    volumes:
+      - ./cc_users:/database
+      - ./logs:/logs
+    environment:
+      - CC_MAX_MESSAGE_SIZE_IN_MiB=${CC_MAX_MESSAGE_SIZE_IN_MiB:-1}
+      - CC_P2P_ENABLED=${CC_P2P_ENABLED:-false}
+      - CC_SIGNUP_ENABLED=false
+      # Dominio público (p. ej. https://clip.tudominio.com), definido en .env
+      - CC_ALLOWED_ORIGINS=${CC_ALLOWED_ORIGINS:-*}
+      # Cifra la base de datos H2: no cambiarlo después del primer arranque
+      - CC_SERVER_DB_PASSWORD=${CC_SERVER_DB_PASSWORD:?Define CC_SERVER_DB_PASSWORD en .env}
+      - CC_SESSION_PERSISTENCE_ENABLED=true

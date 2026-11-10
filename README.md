@@ -258,6 +258,45 @@ Los servicios usan etiquetas que avanzan solas (`latest`, o `release` en Immich)
 
 ---
 
+## 🔐 Notas de servicios concretos
+
+### ClipCascade (puerto 8089)
+- Usuario inicial `admin` / `admin123`: cámbialo en el primer acceso.
+- `CC_SERVER_DB_PASSWORD` (en `.env`) cifra la base de datos: no la cambies después del primer arranque o no podrá abrirla.
+- Detrás de Nginx Proxy Manager activa **Websockets Support** en el host y pon tu dominio en `CC_ALLOWED_ORIGINS`.
+
+### Tinyauth (puerto 3006) con Nginx Proxy Manager
+1. En `tinyauth/.env` define `TINYAUTH_APPURL` (p. ej. `https://auth.tudominio.com`) y `TINYAUTH_AUTH_USERS`. El usuario se genera con
+   `docker run -it --rm ghcr.io/tinyauthapp/tinyauth:v5 user create --interactive`; en el `.env` pon la línea `usuario:hash` **entre comillas simples** y sin `$$` (`TINYAUTH_AUTH_USERS='usuario:$2a$10$...'`), porque `update.sh` también carga el `.env` con bash.
+2. En NPM crea el proxy host de `auth.tudominio.com` → `IP-del-servidor:3006`, **con "Block Common Exploits" desactivado** (bloquea las URLs que tinyauth pasa en la query).
+3. En cada servicio que quieras proteger, pestaña **Advanced** del proxy host:
+
+```nginx
+location / {
+  # La app protegida (ajusta IP:puerto)
+  proxy_pass          http://IP-del-servidor:PUERTO-APP;
+  # Tinyauth auth request
+  auth_request /tinyauth;
+  auth_request_set $redirection_url $upstream_http_x_tinyauth_location;
+  error_page 401 403 =302 $redirection_url;
+}
+
+location /tinyauth {
+  internal;
+  # IP y puerto publicado de tinyauth (no su dominio)
+  proxy_pass http://IP-del-servidor:3006/api/auth/nginx;
+  proxy_pass_request_body off;
+  proxy_set_header content-length "";
+  proxy_set_header x-original-url $scheme://$host$is_request_port$request_port$request_uri;
+  proxy_set_header x-original-method $request_method;
+  proxy_set_header x-forwarded-for $proxy_add_x_forwarded_for;
+  proxy_set_header x-real-ip $remote_addr;
+}
+```
+
+   NPM corre en otro stack, por eso se llega a tinyauth por la IP del servidor y el puerto publicado. Si el servicio protegido usa WebSockets, actívalos en el proxy host.
+4. Para que tinyauth vea la IP real del cliente (necesario si usas listas de IPs), define `TINYAUTH_AUTH_TRUSTEDPROXIES` con la red desde la que llega NPM.
+
 ## 📋 Requisitos del Sistema
 
 El script verifica automáticamente la presencia de las herramientas necesarias al arrancar:

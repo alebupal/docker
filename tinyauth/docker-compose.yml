@@ -1,0 +1,16 @@
+# Tinyauth: login delante de servicios publicados en Nginx Proxy Manager
+# Guía: https://tinyauth.app/docs/guides/nginx-proxy-manager/  (configuración de NPM en docker/README.md)
+services:
+  tinyauth:
+    image: ghcr.io/tinyauthapp/tinyauth:v5
+    container_name: tinyauth
+    restart: unless-stopped
+    ports:
+      - "3006:3000"
+    environment:
+      # URL pública de tinyauth (p. ej. https://auth.tudominio.com)
+      - TINYAUTH_APPURL=${TINYAUTH_APPURL:?Define TINYAUTH_APPURL en .env}
+      # usuario:hash_bcrypt (generar con: docker run -it --rm ghcr.io/tinyauthapp/tinyauth:v5 user create --interactive)
+      - TINYAUTH_AUTH_USERS=${TINYAUTH_AUTH_USERS:?Define TINYAUTH_AUTH_USERS en .env}
+      # IP/red desde la que llega NPM, para fiarse de X-Real-IP / X-Forwarded-For (opcional)
+      - TINYAUTH_AUTH_TRUSTEDPROXIES=${TINYAUTH_AUTH_TRUSTEDPROXIES:-}
