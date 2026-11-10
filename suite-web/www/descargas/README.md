@@ -42,3 +42,4 @@ descargas/
    http://<ip-servidor>:8080/descargas/
    ```
 3. El índice de archivos se actualiza automáticamente al cargar la página o pulsando el botón **Actualizar** de la barra superior.
+

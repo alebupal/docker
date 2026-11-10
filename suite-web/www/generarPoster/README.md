@@ -54,3 +54,4 @@ http://<ip-servidor>:8080/generarPoster/
 1. Busca una película o serie en el buscador **TMDb** (o arrastra una imagen / pega con `Ctrl + V`).
 2. Elige la plantilla deseada o un **Pack** (por ejemplo, *FULL + REMUX*).
 3. Ajusta el encuadre si es necesario y pulsa **Descargar Carátula**.
+

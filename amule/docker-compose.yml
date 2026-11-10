@@ -19,4 +19,5 @@ services:
       - "4672:4672/udp"   # Kademlia UDP
     volumes:
       - ./config:/home/amule/.aMule
-      - ./downloads:/downloads
+      - ${AMULE_TEMP_DIR:-./temp}:/temp
+      - ${AMULE_INCOMING_DIR:-./downloads}:/incoming

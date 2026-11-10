@@ -72,6 +72,11 @@ check_prerequisites() {
     echo -e "${YELLOW}Por favor, instálalos antes de continuar.${NC}"
     exit 1
   fi
+
+  # buildx es opcional: solo se usa para comparar digests remotos (opción 'c' / --check)
+  if ! docker buildx version >/dev/null 2>&1; then
+    echo -e "${YELLOW}⚠️ Aviso: 'docker buildx' no está disponible. La comprobación de actualizaciones (c / --check) devolverá error.${NC}"
+  fi
 }
 
 # ─────────────────────────────
@@ -79,7 +84,7 @@ check_prerequisites() {
 # ─────────────────────────────
 clean_old_backups() {
   if [ -d "$BACKUP_DIR" ]; then
-    find "$BACKUP_DIR" -name "*.tar.gz" -type f -mtime +7 -delete 2>/dev/null || true
+    find "$BACKUP_DIR" -maxdepth 1 -name "*.tar.gz" -type f -mtime +7 -delete 2>/dev/null || true
   fi
 }
 
@@ -96,7 +101,13 @@ reset_config_vars() {
   EXTRA_ARGS=""
   COMMAND=""
   DO_BACKUP=false
+  SERVICE_BACKUP_DIR=""
 }
+
+# Variables globales del script que ni el .env ni el config.sh de un servicio pueden pisar
+PROTECTED_VARS=(BASE_DIR USER_HOME BACKUP_DIR LOG_FILE)
+# Claves cargadas del .env del último servicio (se des-exportan antes de cargar el siguiente)
+LOADED_ENV_KEYS=()
 
 # ─────────────────────────────
 # Cargar Servicio
@@ -104,20 +115,52 @@ reset_config_vars() {
 load_service_config() {
   local service="$1"
   reset_config_vars
+
+  # 1. Olvidar las variables del .env del servicio cargado anteriormente
+  local k
+  for k in "${LOADED_ENV_KEYS[@]}"; do
+    case " ${PROTECTED_VARS[*]} PATH HOME " in
+      *" $k "*) continue ;;
+    esac
+    unset "$k"
+  done
+  LOADED_ENV_KEYS=()
+
+  # 2. Guardar las globales protegidas (el .env/config.sh pueden usarlas, p.ej. ${USER_HOME})
+  local -A saved_globals=()
+  for k in "${PROTECTED_VARS[@]}"; do
+    saved_globals[$k]="${!k}"
+  done
+
   local env_file="$BASE_DIR/$service/.env"
   if [ -f "$env_file" ]; then
+    mapfile -t LOADED_ENV_KEYS < <(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "$env_file")
     set -a
+    # shellcheck disable=SC1090
     source "$env_file"
     set +a
   fi
+
   local config_file="$BASE_DIR/$service/config.sh"
+  local rc=1
   if [ -f "$config_file" ]; then
+    # shellcheck disable=SC1090
     source "$config_file"
     [ -z "$NAME" ] && NAME="$service"
-    return 0
-  else
-    return 1
+    # BACKUP_DIR propio del servicio solo si su config.sh lo define explícitamente (ver plantilla)
+    if grep -qE '^[[:space:]]*(export[[:space:]]+)?BACKUP_DIR=' "$config_file"; then
+      SERVICE_BACKUP_DIR="$BACKUP_DIR"
+    fi
+    rc=0
   fi
+
+  # 3. Restaurar globales y quitarles el export (para no pisar el .env en docker compose)
+  for k in "${PROTECTED_VARS[@]}"; do
+    printf -v "$k" '%s' "${saved_globals[$k]}"
+    # shellcheck disable=SC2163
+    export -n "$k"
+  done
+  return $rc
 }
 
 # ─────────────────────────────
@@ -369,6 +412,74 @@ view_service_logs() {
 }
 
 # ─────────────────────────────
+# docker run común (modo run) con la configuración cargada
+# ─────────────────────────────
+# PORTS/VOLUMES/EXTRA_ARGS/COMMAND son strings que se expanden por palabras a propósito
+# (formato de config.sh); se desactiva el globbing para que '*' o '?' no se expandan.
+docker_run_service() {
+  local restart_flag="--restart=unless-stopped"
+  if [[ "$EXTRA_ARGS" == *"--restart"* ]]; then
+    restart_flag=""
+  fi
+  local glob_was_off=false
+  [[ $- == *f* ]] && glob_was_off=true
+  set -f
+  # shellcheck disable=SC2086
+  docker run -d \
+    $PORTS \
+    ${CONTAINER_NAME:+--name "$CONTAINER_NAME"} \
+    $restart_flag \
+    $VOLUMES \
+    $EXTRA_ARGS \
+    "$IMAGE" \
+    $COMMAND
+  local rc=$?
+  [ "$glob_was_off" = false ] && set +f
+  return $rc
+}
+
+# Recrea el contenedor (modo run) con rollback: el anterior se renombra a <nombre>_old
+# y solo se elimina si el nuevo arranca; si 'docker run' falla se restaura el anterior.
+recreate_run_container() {
+  local old_name=""
+  if [ -n "$CONTAINER_NAME" ] && docker container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
+    old_name="${CONTAINER_NAME}_old"
+    local old_image_id
+    old_image_id=$(docker container inspect -f '{{.Image}}' "$CONTAINER_NAME" 2>/dev/null)
+    echo "🛑 Parando contenedor $CONTAINER_NAME (se conserva como $old_name para rollback)..."
+    docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    docker rm -f "$old_name" >/dev/null 2>&1 || true
+    if ! docker rename "$CONTAINER_NAME" "$old_name" >/dev/null 2>&1; then
+      echo -e "${RED}❌ No se pudo renombrar $CONTAINER_NAME a $old_name. Se vuelve a arrancar y se aborta.${NC}"
+      docker start "$CONTAINER_NAME" >/dev/null 2>&1 || true
+      return 1
+    fi
+  fi
+
+  echo "🚀 Arrancando contenedor $NAME..."
+  if docker_run_service; then
+    if [ -n "$old_name" ]; then
+      docker rm -f "$old_name" >/dev/null 2>&1 || true
+    fi
+    return 0
+  fi
+
+  echo -e "${RED}❌ 'docker run' ha fallado para $NAME.${NC}"
+  if [ -n "$CONTAINER_NAME" ]; then
+    docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$old_name" ]; then
+    echo -e "⏪ ${YELLOW}Rollback: restaurando contenedor anterior (imagen ${old_image_id:0:19})...${NC}"
+    if docker rename "$old_name" "$CONTAINER_NAME" >/dev/null 2>&1 && docker start "$CONTAINER_NAME" >/dev/null 2>&1; then
+      echo -e "   ${GREEN}✓${NC} Contenedor anterior $CONTAINER_NAME restaurado y arrancado."
+    else
+      echo -e "   ${RED}❌ No se pudo restaurar automáticamente. Revisa el contenedor '$old_name'.${NC}"
+    fi
+  fi
+  return 1
+}
+
+# ─────────────────────────────
 # Control de Ciclo de Vida (Start / Stop / Restart)
 # ─────────────────────────────
 lifecycle_service() {
@@ -428,22 +539,7 @@ lifecycle_service() {
         docker restart "$CONTAINER_NAME"
         ;;
       recreate)
-        echo "🛑 Parando y eliminando contenedor anterior $CONTAINER_NAME..."
-        docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
-        docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
-        echo "🚀 Recreando y arrancando contenedor $NAME..."
-        local restart_flag="--restart=unless-stopped"
-        if [[ "$EXTRA_ARGS" == *"--restart"* ]]; then
-          restart_flag=""
-        fi
-        docker run -d \
-          $PORTS \
-          ${CONTAINER_NAME:+--name "$CONTAINER_NAME"} \
-          $restart_flag \
-          $VOLUMES \
-          $EXTRA_ARGS \
-          "$IMAGE" \
-          $COMMAND
+        recreate_run_container
         ;;
       *)
         echo -e "${RED}❌ Acción inválida: $action${NC}"
@@ -590,7 +686,14 @@ change_service_restart_policy() {
   echo -e "   ${GREEN}✅ Política de reinicio cambiada a: $new_policy${NC}"
 }
 
+# Uso: select_lifecycle_menu [servicio]
+# Con servicio (carpeta ya resuelta) se omite el listado y se muestra directamente
+# el submenú de acciones para ese servicio.
 select_lifecycle_menu() {
+  local preselected="$1"
+  local target_services=()
+  local direct_action=""
+
   echo ""
   echo -e "${BLUE}==========================================================="
   echo "⏯️ Gestión de Servicios (Ciclo de Vida y Actualizaciones)"
@@ -601,95 +704,96 @@ select_lifecycle_menu() {
     return 0
   fi
 
-  printf " ${GRAY}%-4s %-25s %-18s %-10s %-8s %s${NC}\n" "#" "SERVICIO" "CARPETA" "MODO" "PUERTO" "ESTADO"
-  echo -e "${GRAY}------------------------------------------------------------------------------------------${NC}"
-  local i=1
-  for s in "${SERVICES[@]}"; do
-    load_service_config "$s"
-    local st
-    st=$(get_service_status "$s")
-    local p
-    p=$(get_service_port "$s")
+  if [ -n "$preselected" ]; then
+    target_services=("$preselected")
+  else
+    printf " ${GRAY}%-4s %-25s %-18s %-10s %-8s %s${NC}\n" "#" "SERVICIO" "CARPETA" "MODO" "PUERTO" "ESTADO"
+    echo -e "${GRAY}------------------------------------------------------------------------------------------${NC}"
+    local i=1
+    for s in "${SERVICES[@]}"; do
+      load_service_config "$s"
+      local st
+      st=$(get_service_status "$s")
+      local p
+      p=$(get_service_port "$s")
 
-    local disp_name="$NAME"
-    [ ${#disp_name} -gt 24 ] && disp_name="${disp_name:0:21}..."
-    local disp_s="$s"
-    [ ${#disp_s} -gt 17 ] && disp_s="${disp_s:0:15}..."
+      local disp_name="$NAME"
+      [ ${#disp_name} -gt 24 ] && disp_name="${disp_name:0:21}..."
+      local disp_s="$s"
+      [ ${#disp_s} -gt 17 ] && disp_s="${disp_s:0:15}..."
 
-    printf " %2d) ${GREEN}%-24s${NC} ${GRAY}%-18s${NC} ${YELLOW}%-10s${NC} ${CYAN}%-8s${NC} %b\n" \
-      "$i" "$disp_name" "$disp_s" "[$MODE]" "$p" "$st"
-    ((i++))
-  done
-  echo -e "${GRAY}------------------------------------------------------------------------------------------${NC}"
+      printf " %2d) ${GREEN}%-24s${NC} ${GRAY}%-18s${NC} ${YELLOW}%-10s${NC} ${CYAN}%-8s${NC} %b\n" \
+        "$i" "$disp_name" "$disp_s" "[$MODE]" "$p" "$st"
+      ((i++))
+    done
+    echo -e "${GRAY}------------------------------------------------------------------------------------------${NC}"
 
-  echo ""
-  echo -e " ${CYAN}🎯 Selección de objetivo:${NC}"
-  echo -e "  ${GREEN}1..N${NC}) Gestionar un servicio específico"
-  echo -e "  ${GREEN}a${NC})    ⭐ Gestionar TODOS los servicios"
-  echo ""
-  echo -e " ${CYAN}⚡ Acciones rápidas para TODOS los servicios:${NC}"
-  echo -e "  ${YELLOW}ua${NC}) 🚀 Actualizar TODOS (Pull de imágenes de internet + Deploy)"
-  echo -e "  ${YELLOW}ca${NC}) 🔨 Recrear TODOS (En local, sin descargar)"
-  echo -e "  ${YELLOW}sa${NC}) ▶  Iniciar TODOS (start-all)"
-  echo -e "  ${YELLOW}ra${NC}) 🔄 Reiniciar TODOS (restart-all)"
-  echo -e "  ${YELLOW}ta${NC}) ⏹  Detener TODOS (stop-all)"
-  echo -e "  ${YELLOW}pa${NC}) 🔁 Cambiar política de reinicio a TODOS (policy-all)"
-  echo ""
-  echo -e "  ${GRAY}q) Volver al menú principal${NC}"
-  echo "-----------------------------------------------------------"
-  read -rp "👉 Elige una opción: " SVC_OPT
+    echo ""
+    echo -e " ${CYAN}🎯 Selección de objetivo:${NC}"
+    echo -e "  ${GREEN}1..N${NC}) Gestionar un servicio específico"
+    echo -e "  ${GREEN}a${NC})    ⭐ Gestionar TODOS los servicios"
+    echo ""
+    echo -e " ${CYAN}⚡ Acciones rápidas para TODOS los servicios:${NC}"
+    echo -e "  ${YELLOW}ua${NC}) 🚀 Actualizar TODOS (Pull de imágenes de internet + Deploy)"
+    echo -e "  ${YELLOW}ca${NC}) 🔨 Recrear TODOS (En local, sin descargar)"
+    echo -e "  ${YELLOW}sa${NC}) ▶  Iniciar TODOS (start-all)"
+    echo -e "  ${YELLOW}ra${NC}) 🔄 Reiniciar TODOS (restart-all)"
+    echo -e "  ${YELLOW}ta${NC}) ⏹  Detener TODOS (stop-all)"
+    echo -e "  ${YELLOW}pa${NC}) 🔁 Cambiar política de reinicio a TODOS (policy-all)"
+    echo ""
+    echo -e "  ${GRAY}q) Volver al menú principal${NC}"
+    echo "-----------------------------------------------------------"
+    read -rp "👉 Elige una opción: " SVC_OPT
 
-  local target_services=()
-  local direct_action=""
-
-  case "$SVC_OPT" in
-    q|Q)
-      return 0
-      ;;
-    ua|UA|update-all|UPDATE-ALL)
-      target_services=("${SERVICES[@]}")
-      direct_action="update"
-      ;;
-    ca|CA|recreate-all|RECREATE-ALL)
-      target_services=("${SERVICES[@]}")
-      direct_action="recreate"
-      ;;
-    sa|SA|start-all|START-ALL)
-      target_services=("${SERVICES[@]}")
-      direct_action="start"
-      ;;
-    ra|RA|restart-all|RESTART-ALL)
-      target_services=("${SERVICES[@]}")
-      direct_action="restart"
-      ;;
-    ta|TA|stop-all|STOP-ALL)
-      target_services=("${SERVICES[@]}")
-      direct_action="stop"
-      ;;
-    pa|PA|policy-all|POLICY-ALL)
-      target_services=("${SERVICES[@]}")
-      direct_action="policy"
-      ;;
-    a|A)
-      target_services=("${SERVICES[@]}")
-      ;;
-    *)
-      local resolved
-      resolved=$(resolve_service_input "$SVC_OPT")
-      if [ -n "$resolved" ]; then
-        target_services=("$resolved")
-      else
-        echo -e "${RED}❌ Opción o servicio inválido: '$SVC_OPT'${NC}"
-        return 1
-      fi
-      ;;
-  esac
+    case "$SVC_OPT" in
+      q|Q)
+        return 0
+        ;;
+      ua|UA|update-all|UPDATE-ALL)
+        target_services=("${SERVICES[@]}")
+        direct_action="update"
+        ;;
+      ca|CA|recreate-all|RECREATE-ALL)
+        target_services=("${SERVICES[@]}")
+        direct_action="recreate"
+        ;;
+      sa|SA|start-all|START-ALL)
+        target_services=("${SERVICES[@]}")
+        direct_action="start"
+        ;;
+      ra|RA|restart-all|RESTART-ALL)
+        target_services=("${SERVICES[@]}")
+        direct_action="restart"
+        ;;
+      ta|TA|stop-all|STOP-ALL)
+        target_services=("${SERVICES[@]}")
+        direct_action="stop"
+        ;;
+      pa|PA|policy-all|POLICY-ALL)
+        target_services=("${SERVICES[@]}")
+        direct_action="policy"
+        ;;
+      a|A)
+        target_services=("${SERVICES[@]}")
+        ;;
+      *)
+        local resolved
+        resolved=$(resolve_service_input "$SVC_OPT")
+        if [ -n "$resolved" ]; then
+          target_services=("$resolved")
+        else
+          echo -e "${RED}❌ Opción o servicio inválido: '$SVC_OPT'${NC}"
+          return 1
+        fi
+        ;;
+    esac
+  fi
 
   local act="$direct_action"
   if [ -z "$act" ]; then
     local target_desc="el servicio seleccionado"
     local current_pol_info=""
-    if [ ${#target_services[@]} -eq ${#SERVICES[@]} ]; then
+    if [ ${#target_services[@]} -eq ${#SERVICES[@]} ] && [ -z "$preselected" ]; then
       target_desc="TODOS los servicios"
     else
       load_service_config "${target_services[0]}"
@@ -725,7 +829,7 @@ select_lifecycle_menu() {
     for s in "${target_services[@]}"; do
       update_service "$s" true false
     done
-    if [ ${#target_services[@]} -eq ${#SERVICES[@]} ]; then
+    if [ ${#target_services[@]} -eq ${#SERVICES[@]} ] && [ -z "$preselected" ]; then
       echo "🧹 Limpiando imágenes antiguas..."
       docker image prune -f
     fi
@@ -799,7 +903,7 @@ manage_maintenance() {
   case "$C_OPT" in
     1)
       if [ -f "$LOG_FILE" ]; then
-        > "$LOG_FILE"
+        : > "$LOG_FILE"
         echo -e "✅ ${GREEN}Archivo de log vaciado ($LOG_FILE).${NC}"
       else
         echo -e "${YELLOW}No existe archivo de log previo.${NC}"
@@ -809,8 +913,7 @@ manage_maintenance() {
       read -rp "⚠️ ¿Seguro que deseas eliminar TODOS los backups en $BACKUP_DIR? (s/N): " CONF
       if [[ "$CONF" =~ ^[sS]$ ]]; then
         local count
-        count=$(find "$BACKUP_DIR" -name "*.tar.gz" -type f 2>/dev/null | wc -l)
-        rm -f "$BACKUP_DIR"/*.tar.gz 2>/dev/null || true
+        count=$(find "$BACKUP_DIR" -maxdepth 1 -name "*.tar.gz" -type f -delete -print 2>/dev/null | wc -l)
         echo -e "✅ ${GREEN}Se han eliminado $count copias de seguridad.${NC}"
       else
         echo "Cancelado."
@@ -818,8 +921,7 @@ manage_maintenance() {
       ;;
     3)
       local count
-      count=$(find "$BACKUP_DIR" -name "*.tar.gz" -type f -mtime +3 2>/dev/null | wc -l)
-      find "$BACKUP_DIR" -name "*.tar.gz" -type f -mtime +3 -delete 2>/dev/null || true
+      count=$(find "$BACKUP_DIR" -maxdepth 1 -name "*.tar.gz" -type f -mtime +3 -delete -print 2>/dev/null | wc -l)
       echo -e "✅ ${GREEN}Se han eliminado $count copias de seguridad de más de 3 días.${NC}"
       ;;
     4)
@@ -838,8 +940,8 @@ manage_maintenance() {
       fi
       ;;
     6)
-      [ -f "$LOG_FILE" ] && > "$LOG_FILE"
-      find "$BACKUP_DIR" -name "*.tar.gz" -type f -mtime +3 -delete 2>/dev/null || true
+      [ -f "$LOG_FILE" ] && : > "$LOG_FILE"
+      find "$BACKUP_DIR" -maxdepth 1 -name "*.tar.gz" -type f -mtime +3 -delete 2>/dev/null || true
       docker image prune -f
       echo -e "✅ ${GREEN}Limpieza completa realizada (Log vaciado, backups antiguos eliminados e imágenes limpiadas).${NC}"
       ;;
@@ -857,10 +959,12 @@ perform_service_backup() {
   local mode_flag="$2"
   load_service_config "$service" || return 1
 
-  mkdir -p "$BACKUP_DIR" 2>/dev/null || true
+  # BACKUP_DIR propio del servicio (si su config.sh lo define) o el global
+  local dest_dir="${SERVICE_BACKUP_DIR:-$BACKUP_DIR}"
+  mkdir -p "$dest_dir" 2>/dev/null || true
   local ts
   ts=$(date +%Y%m%d_%H%M%S)
-  local backup_file="$BACKUP_DIR/${service}_backup_${ts}.tar.gz"
+  local backup_file="$dest_dir/${service}_backup_${ts}.tar.gz"
   local service_dir="$BASE_DIR/$service"
 
   if [ "$mode_flag" != "silent" ]; then
@@ -870,31 +974,66 @@ perform_service_backup() {
   fi
 
   local success=false
+  # Todas las rutas se guardan relativas a '/' (tar -C /) para restaurarlas en su ubicación original
+  local tar_args=()
+  local not_included=()
+  if [ -d "$service_dir" ]; then
+    tar_args+=("${service_dir#/}")
+  fi
 
   if [ "$MODE" = "compose" ]; then
-    if [ -d "$service_dir" ]; then
-      if tar -czf "$backup_file" -C "$BASE_DIR" "$service" 2>/dev/null; then
-        success=true
+    local m_type m_src
+    while IFS='|' read -r m_type m_src; do
+      [ -z "$m_src" ] && continue
+      if [ "$m_type" = "volume" ]; then
+        not_included+=("volumen con nombre: $m_src")
+      elif [[ "$m_src" != "$service_dir" && "$m_src" != "$service_dir/"* ]]; then
+        not_included+=("bind mount externo: $m_src")
       fi
-    fi
-  else
-    local tar_args=()
-    if [ -d "$service_dir" ]; then
-      tar_args+=("-C" "$BASE_DIR" "$service")
-    fi
-    if [ -n "$VOLUMES" ]; then
-      for vol in $VOLUMES; do
-        host_path=$(echo "$vol" | cut -d: -f1 | sed 's/^-v //')
-        if [ -d "$host_path" ] && [[ "$host_path" != "$service_dir"* ]]; then
-          tar_args+=("$host_path")
+    done < <(compose_mount_sources "$service_dir")
+  elif [ -n "$VOLUMES" ]; then
+    local glob_was_off=false
+    [[ $- == *f* ]] && glob_was_off=true
+    set -f
+    local vol prev="" host_path
+    # shellcheck disable=SC2086
+    for vol in $VOLUMES; do
+      host_path=""
+      case "$prev" in
+        -v|--volume) host_path="${vol%%:*}" ;;
+        --mount) not_included+=("--mount (no analizado): $vol") ;;
+      esac
+      case "$vol" in
+        -v=*|--volume=*) host_path="${vol#*=}"; host_path="${host_path%%:*}" ;;
+      esac
+      prev="$vol"
+      [ -z "$host_path" ] && continue
+      if [[ "$host_path" != /* ]]; then
+        not_included+=("volumen con nombre: $host_path")
+      elif [[ "$host_path" == /dev/* || "$host_path" == /var/run/* || "$host_path" == /run/* ]]; then
+        continue
+      elif [ -d "$host_path" ] || [ -f "$host_path" ]; then
+        if [[ "$host_path" != "$service_dir" && "$host_path" != "$service_dir/"* ]]; then
+          tar_args+=("${host_path#/}")
         fi
-      done
-    fi
-
-    if [ ${#tar_args[@]} -gt 0 ]; then
-      if tar -czf "$backup_file" "${tar_args[@]}" 2>/dev/null; then
-        success=true
+      else
+        not_included+=("ruta inexistente: $host_path")
       fi
+    done
+    [ "$glob_was_off" = false ] && set +f
+  fi
+
+  if [ ${#not_included[@]} -gt 0 ]; then
+    echo -e "  ⚠️ ${YELLOW}No incluido en el backup de $service (respáldalo por separado si contiene datos):${NC}" >&2
+    local ni
+    for ni in "${not_included[@]}"; do
+      echo -e "     - $ni" >&2
+    done
+  fi
+
+  if [ ${#tar_args[@]} -gt 0 ]; then
+    if tar -czf "$backup_file" -C / "${tar_args[@]}" 2>/dev/null; then
+      success=true
     fi
   fi
 
@@ -916,6 +1055,46 @@ perform_service_backup() {
   fi
 }
 
+# Lista los montajes de un stack compose como "bind|/ruta" o "volume|nombre"
+compose_mount_sources() {
+  local service_dir="$1"
+  [ -d "$service_dir" ] || return 0
+  (cd "$service_dir" 2>/dev/null && docker compose config 2>/dev/null) | awk '
+    /^[[:space:]]*-[[:space:]]+type:[[:space:]]*(bind|volume)[[:space:]]*$/ { t = $3; next }
+    t != "" && /^[[:space:]]*source:/ { sub(/^[[:space:]]*source:[[:space:]]*/, ""); print t "|" $0; t = ""; next }
+    /^[[:space:]]*-[[:space:]]/ { t = "" }
+  '
+}
+
+# Backup manual de un servicio, deteniéndolo antes si se pide y está en ejecución
+manual_backup_service() {
+  local service="$1"
+  local stop_first="$2"
+  local was_running=false
+  if [ "$stop_first" = true ] && [[ "$(get_service_status "$service")" == *"RUNNING"* ]]; then
+    was_running=true
+    echo -e "⏹️ ${YELLOW}Deteniendo $service temporalmente para un backup consistente...${NC}"
+    lifecycle_service "$service" "stop"
+  fi
+  perform_service_backup "$service"
+  local rc=$?
+  if [ "$was_running" = true ]; then
+    echo -e "▶ ${GREEN}Volviendo a iniciar $service...${NC}"
+    lifecycle_service "$service" "start"
+  fi
+  return $rc
+}
+
+ask_stop_for_backup() {
+  local ans
+  read -rp "⏹️ ¿Detener temporalmente los servicios en ejecución durante el backup para evitar datos inconsistentes? (s/N): " ans
+  if [[ "$ans" =~ ^[sS]$ ]]; then
+    echo true
+  else
+    echo false
+  fi
+}
+
 create_manual_backup_menu() {
   local target="$1"
   discover_services
@@ -930,15 +1109,18 @@ create_manual_backup_menu() {
     return 0
   fi
 
+  local stop_first
   if [ -n "$target" ]; then
     if [ "$target" = "all" ] || [ "$target" = "ALL" ]; then
+      stop_first=$(ask_stop_for_backup)
       echo -e "${CYAN}📦 Generando backup de TODOS los servicios en $BACKUP_DIR...${NC}"
       for s in "${SERVICES[@]}"; do
-        perform_service_backup "$s"
+        manual_backup_service "$s" "$stop_first"
       done
       return 0
-    elif [[ " ${SERVICES[*]} " =~ " $target " ]]; then
-      perform_service_backup "$target"
+    elif [[ " ${SERVICES[*]} " == *" $target "* ]]; then
+      stop_first=$(ask_stop_for_backup)
+      manual_backup_service "$target" "$stop_first"
       return 0
     else
       echo -e "${RED}❌ Servicio no encontrado: $target${NC}"
@@ -966,9 +1148,10 @@ create_manual_backup_menu() {
       ;;
     a|A)
       echo ""
+      stop_first=$(ask_stop_for_backup)
       echo -e "${CYAN}📦 Generando backup de TODOS los servicios en $BACKUP_DIR...${NC}"
       for s in "${SERVICES[@]}"; do
-        perform_service_backup "$s"
+        manual_backup_service "$s" "$stop_first"
       done
       ;;
     *)
@@ -976,7 +1159,8 @@ create_manual_backup_menu() {
       resolved=$(resolve_service_input "$B_OPT")
       if [ -n "$resolved" ]; then
         echo ""
-        perform_service_backup "$resolved"
+        stop_first=$(ask_stop_for_backup)
+        manual_backup_service "$resolved" "$stop_first"
       else
         echo -e "${RED}❌ Opción o servicio inválido: '$B_OPT'${NC}"
       fi
@@ -1039,13 +1223,21 @@ restore_backup() {
     done
 
     local first_entry
-    first_entry=$(tar -tf "$selected_backup" 2>/dev/null | head -n 1)
+    first_entry=$(tar -tzf "$selected_backup" 2>/dev/null | head -n 1)
     local default_dest="$BASE_DIR"
+    # Formatos: "raiz" (actual, rutas relativas a '/'), "antiguo" ('<servicio>/' relativo a
+    # BASE_DIR + volúmenes externos con ruta absoluta sin '/') o "desconocido".
+    local backup_format="desconocido"
 
-    if [ -n "$detected_svc" ]; then
-      if [[ "$first_entry" != "$detected_svc"* ]]; then
-        default_dest="$BASE_DIR/$detected_svc"
-      fi
+    if [[ "$first_entry" == "${BASE_DIR#/}/"* ]]; then
+      backup_format="raiz"
+      default_dest="/"
+      echo -e "ℹ️ Backup con rutas relativas a '/': se restaurará cada ruta en su ubicación original."
+    elif [ -n "$detected_svc" ] && [[ "$first_entry" == "$detected_svc"* ]]; then
+      backup_format="antiguo"
+      echo -e "ℹ️ Backup en formato antiguo: '${detected_svc}/' se restaurará en ${CYAN}$BASE_DIR${NC} y las rutas de volúmenes externos en '/'."
+    elif [ -n "$detected_svc" ]; then
+      default_dest="$BASE_DIR/$detected_svc"
     fi
 
     echo -e "Directorio destino sugerido: ${CYAN}$default_dest${NC}"
@@ -1072,8 +1264,20 @@ restore_backup() {
 
     mkdir -p "$DEST_DIR"
     echo ""
-    echo -e "📦 Descomprimiendo ${YELLOW}$fname${NC} en ${CYAN}$DEST_DIR${NC}..."
-    if tar -xzf "$selected_backup" -C "$DEST_DIR"; then
+    local extract_ok=false
+    if [ "$backup_format" = "antiguo" ] && [ "$DEST_DIR" = "$default_dest" ]; then
+      echo -e "📦 Descomprimiendo ${YELLOW}$fname${NC} ('${detected_svc}/' en ${CYAN}$BASE_DIR${NC}, resto en ${CYAN}/${NC})..."
+      if tar -xzf "$selected_backup" -C "$BASE_DIR" "$detected_svc" && \
+         tar -xzf "$selected_backup" -C / --anchored --exclude="$detected_svc" --exclude="$detected_svc/*"; then
+        extract_ok=true
+      fi
+    else
+      echo -e "📦 Descomprimiendo ${YELLOW}$fname${NC} en ${CYAN}$DEST_DIR${NC}..."
+      if tar -xzf "$selected_backup" -C "$DEST_DIR"; then
+        extract_ok=true
+      fi
+    fi
+    if [ "$extract_ok" = true ]; then
       echo -e "✅ ${GREEN}Archivos restaurados con éxito.${NC}"
 
       if [ -n "$detected_svc" ]; then
@@ -1127,12 +1331,17 @@ configure_user_home() {
 
   echo ""
   read -rp "🔄 ¿Deseas actualizar las rutas de volúmenes en todos los config.sh existentes? (S/n): " UPD_OPT
-  if [[ ! "$UPD_OPT" =~ ^[nN]$ ]]; then
+  if [[ ! "$UPD_OPT" =~ ^[nN]$ ]] && [ -n "$old_home" ] && [ "$old_home" != "$USER_HOME" ]; then
     local count=0
+    # Escapar para sed (ERE y reemplazo) y anclar a fin de ruta: '/', ':', comillas, espacio o fin de línea
+    local old_re sed_re new_rep
+    old_re=$(printf '%s' "$old_home" | sed 's/[][\.*^$+?(){}|]/\\&/g')
+    sed_re="${old_re//#/\\#}"
+    new_rep=$(printf '%s' "$USER_HOME" | sed 's/[\&#]/\\&/g')
     for cfg in "$BASE_DIR"/*/config.sh; do
       if [ -f "$cfg" ]; then
-        if grep -q "$old_home" "$cfg"; then
-          sed -i "s|$old_home|$USER_HOME|g" "$cfg"
+        if grep -qE "${old_re}([/:\"'[:space:]]|$)" "$cfg"; then
+          sed -i -E "s#${sed_re}([/:\"'[:space:]]|\$)#${new_rep}\1#g" "$cfg"
           ((count++))
           echo -e "  • Actualizado: ${CYAN}$(basename "$(dirname "$cfg")")/config.sh${NC}"
         fi
@@ -1167,9 +1376,20 @@ parse_docker_run_command() {
   local parsed_cmd_tokens=()
   local is_image_found=false
 
-  # Tokenizar preservando comillas
+  # Tokenizar preservando comillas SIN eval (no se ejecuta ningún $(...) ni `...` pegado)
   local tokens=()
-  eval "tokens=($raw_cmd)" 2>/dev/null || read -ra tokens <<< "$raw_cmd"
+  local tok_file
+  tok_file=$(mktemp)
+  if command -v python3 >/dev/null 2>&1 && \
+     printf '%s' "$raw_cmd" | python3 -c 'import shlex,sys; sys.stdout.write("".join(t + "\0" for t in shlex.split(sys.stdin.read())))' > "$tok_file" 2>/dev/null; then
+    mapfile -d '' -t tokens < "$tok_file"
+  elif printf '%s' "$raw_cmd" | xargs printf '%s\0' > "$tok_file" 2>/dev/null; then
+    # Fallback: xargs respeta comillas simples/dobles y no expande nada
+    mapfile -d '' -t tokens < "$tok_file"
+  else
+    read -ra tokens <<< "$raw_cmd"
+  fi
+  rm -f "$tok_file"
 
   local i=0
   local num_tokens=${#tokens[@]}
@@ -1298,6 +1518,13 @@ parse_docker_run_command() {
 
 # Transformar volúmenes a la carpeta del servicio
 transform_service_volume() {
+  # Uso: transform_service_volume "-v origen:destino[:opts]" servicio
+  # Imprime "línea_para_config.sh<TAB>línea_para_.env" (la segunda puede ir vacía).
+  # Nunca escribe rutas personales en config.sh (que se versiona):
+  #  - rutas absolutas del host (/mnt/..., /home/..., ~/...) -> .env como <SVC>_<CARPETA>_DIR
+  #    y en config.sh se referencian como ${VAR};
+  #  - rutas relativas, $PWD o volúmenes con nombre -> ${USER_HOME}/<svc>/config/<sub>
+  #    (literal, sin expandir: se resuelve al cargar el config.sh).
   local vol_entry="$1"
   local s_name="$2"
 
@@ -1305,15 +1532,36 @@ transform_service_volume() {
     local src="${BASH_REMATCH[1]}"
     local dst="${BASH_REMATCH[2]}"
 
-    # Conservar sockets y dispositivos especiales
-    if [[ "$src" =~ ^/var/run/docker\.sock$ || "$src" =~ ^/dev/ ]]; then
-      echo "-v $src:$dst"
+    # Conservar sockets y dispositivos especiales (no son rutas personales)
+    if [[ "$src" =~ ^/var/run/docker\.sock$ || "$src" =~ ^/run/docker\.sock$ || "$src" =~ ^/dev/ ]]; then
+      printf '%s\t\n' "-v $src:$dst"
       return
     fi
 
-    echo "-v $USER_HOME/$s_name/config:$dst"
+    local ctr_path="${dst%%:*}"
+    local sub
+    sub=$(basename "$ctr_path" 2>/dev/null)
+    if [ -z "$sub" ] || [ "$sub" = "/" ] || [ "$sub" = "." ]; then
+      sub="root"
+    fi
+
+    # Ruta absoluta del host (o ~): se conserva la ubicación real, pero en el .env
+    if [[ "$src" == /* || "$src" == "~"* ]]; then
+      local real="$src"
+      [[ "$real" == "~"* ]] && real="${USER_HOME}${real#\~}"
+      local var
+      var=$(printf '%s_%s_DIR' "$s_name" "$sub" | tr '[:lower:]-. ' '[:upper:]___' | sed 's/[^A-Z0-9_]/_/g; s/__*/_/g')
+      [[ "$var" =~ ^[0-9] ]] && var="V_$var"
+      local quoted
+      printf -v quoted '%q' "$real"
+      printf '%s\t%s\n' "-v \${$var}:$dst" "$var=$quoted"
+      return
+    fi
+
+    # Relativa, $PWD o volumen con nombre: a la carpeta del servicio, con ${USER_HOME} sin expandir
+    printf '%s\t\n' "-v \${USER_HOME}/$s_name/config/$sub:$dst"
   else
-    echo "$vol_entry"
+    printf '%s\t\n' "$vol_entry"
   fi
 }
 
@@ -1464,15 +1712,15 @@ create_new_service() {
     if [ ${#PARSED_VOLUMES[@]} -gt 0 ]; then
       echo -e "  • ${YELLOW}Volúmenes:${NC}"
       for v in "${PARSED_VOLUMES[@]}"; do
-        local preview_v
-        preview_v=$(transform_service_volume "$v" "$def_dir")
-        echo -e "      $preview_v"
+        local preview_line preview_env
+        IFS=$'\t' read -r preview_line preview_env < <(transform_service_volume "$v" "$def_dir")
+        echo -e "      $preview_line${preview_env:+  ${GRAY}(ruta real en .env: ${preview_env%%=*})${NC}}"
       done
     fi
     if [ ${#PARSED_EXTRA[@]} -gt 0 ]; then
       echo -e "  • ${YELLOW}Flags extra:${NC}"
       for e in "${PARSED_EXTRA[@]}"; do
-        echo -e "      $e"
+        echo "      $e" | mask_secrets
       done
     fi
     if [ -n "$PARSED_COMMAND" ]; then
@@ -1526,8 +1774,12 @@ create_new_service() {
 
     # Mapear rutas de host (como PWD o carpetas relativas o named volumes) a la subcarpeta config del servicio
     local adjusted_volumes=()
+    local env_lines=()
+    local vol_line vol_env
     for v in "${PARSED_VOLUMES[@]}"; do
-      adjusted_volumes+=("$(transform_service_volume "$v" "$SERVICE_DIR_NAME")")
+      IFS=$'\t' read -r vol_line vol_env < <(transform_service_volume "$v" "$SERVICE_DIR_NAME")
+      adjusted_volumes+=("$vol_line")
+      [ -n "$vol_env" ] && env_lines+=("$vol_env")
     done
 
     local volumes_block="VOLUMES=\"\""
@@ -1539,10 +1791,23 @@ create_new_service() {
       volumes_block+=$'\n'"\""
     fi
 
+    # Variables -e sensibles (o con caracteres que romperían el config.sh) van al .env
+    # del servicio y en config.sh se referencian como ${VAR}
+    local spaced_vars=()
     local extra_block="EXTRA_ARGS=\"\""
     if [ ${#PARSED_EXTRA[@]} -gt 0 ]; then
       extra_block="EXTRA_ARGS=\""
       for e in "${PARSED_EXTRA[@]}"; do
+        if [[ "$e" =~ ^(-e|--env)[=[:space:]]([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+          local e_opt="${BASH_REMATCH[1]}" e_key="${BASH_REMATCH[2]}" e_val="${BASH_REMATCH[3]}"
+          if [[ "${e_key^^}" =~ $SECRET_KEY_REGEX ]] || [[ "$e_val" == *[\$\`\"\\]* ]]; then
+            local e_quoted
+            printf -v e_quoted '%q' "$e_val"
+            env_lines+=("$e_key=$e_quoted")
+            e="$e_opt $e_key=\${$e_key}"
+          fi
+          [[ "$e_val" =~ [[:space:]] ]] && spaced_vars+=("$e_key")
+        fi
         extra_block+=$'\n'"$e"
       done
       extra_block+=$'\n'"\""
@@ -1574,6 +1839,20 @@ ${cmd_block:+$cmd_block
 EOF
 
     chmod +x "$target_dir/config.sh"
+
+    if [ ${#env_lines[@]} -gt 0 ]; then
+      {
+        echo "# Variables sensibles y rutas del host generadas por update.sh (referenciadas desde config.sh)."
+        echo "# Este fichero no se versiona: aquí van tus rutas reales y secretos."
+        printf '%s\n' "${env_lines[@]}"
+      } > "$target_dir/.env"
+      chmod 600 "$target_dir/.env"
+      echo -e "🔐 ${CYAN}${#env_lines[@]} variable(s) (secretos y rutas del host) guardadas en${NC} $SERVICE_DIR_NAME/.env ${GRAY}(no en config.sh)${NC}"
+    fi
+    if [ ${#spaced_vars[@]} -gt 0 ]; then
+      echo -e "⚠️ ${YELLOW}Variables con espacios en su valor: ${spaced_vars[*]}.${NC}"
+      echo -e "   ${YELLOW}EXTRA_ARGS se divide por espacios al ejecutar 'docker run'; usa --env-file para ellas.${NC}"
+    fi
     echo ""
     echo -e "✅ ${GREEN}Servicio '$NEW_NAME' generado con éxito en '$SERVICE_DIR_NAME/config.sh'${NC}"
     echo -e "📁 ${CYAN}Carpeta de configuración creada:${NC} $SERVICE_DIR_NAME/config"
@@ -1619,13 +1898,25 @@ EOF
     fi
 
     local volumes_block="VOLUMES=\"\""
+    local wiz_env_line=""
     if [ -n "$NEW_VOLUMES_RAW" ]; then
+      local wiz_vol_line
+      IFS=$'\t' read -r wiz_vol_line wiz_env_line < <(transform_service_volume "-v ${NEW_VOLUMES_RAW#-v }" "$SERVICE_DIR_NAME")
       volumes_block="VOLUMES=\"
--v $NEW_VOLUMES_RAW
+$wiz_vol_line
 \""
     fi
 
     mkdir -p "$target_dir"
+    if [ -n "$wiz_env_line" ]; then
+      {
+        echo "# Rutas del host generadas por update.sh (referenciadas desde config.sh)."
+        echo "# Este fichero no se versiona: aquí van tus rutas reales y secretos."
+        echo "$wiz_env_line"
+      } > "$target_dir/.env"
+      chmod 600 "$target_dir/.env"
+      echo -e "🔐 ${CYAN}Ruta del host guardada en${NC} $SERVICE_DIR_NAME/.env ${GRAY}(${wiz_env_line%%=*}, no en config.sh)${NC}"
+    fi
 
     cat <<EOF > "$target_dir/config.sh"
 #!/bin/bash
@@ -1693,9 +1984,19 @@ services:
     container_name: ${SERVICE_DIR_NAME}_app
     ports:
       - "8080:80"
+    # Rutas del host: defínelas en .env (no se versiona) y úsalas aquí como \${VAR}
+    volumes:
+      - \${DATA_DIR:-./data}:/data
     restart: unless-stopped
 EOF
-      echo -e "📄 Creado ${GREEN}docker-compose.yml${NC} de plantilla en ${GRAY}$target_dir${NC}"
+      if [ ! -f "$target_dir/.env" ]; then
+        {
+          echo "# Rutas reales del host y secretos de este stack (no se versiona)."
+          echo "# DATA_DIR=/ruta/real/a/los/datos"
+        } > "$target_dir/.env"
+        chmod 600 "$target_dir/.env"
+      fi
+      echo -e "📄 Creado ${GREEN}docker-compose.yml${NC} de plantilla en ${GRAY}$target_dir${NC} ${GRAY}(rutas del host en .env)${NC}"
     fi
 
     chmod +x "$target_dir/config.sh"
@@ -1707,7 +2008,7 @@ EOF
   if [[ ! "$START_NOW" =~ ^[nN]$ ]]; then
     echo ""
     discover_services
-    update_service "$SERVICE_DIR_NAME" false
+    update_service "$SERVICE_DIR_NAME" true
   fi
 
   return 0
@@ -1740,8 +2041,13 @@ check_image_update() {
   local local_digest
   local_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$img" 2>/dev/null | cut -d'@' -f2 || echo "none")
 
-  local remote_digest
-  if ! remote_digest=$(docker buildx imagetools inspect "$img" --format '{{json .Manifest.Digest}}' 2>/dev/null | tr -d '"'); then
+  local remote_raw remote_digest
+  if ! remote_raw=$(docker buildx imagetools inspect "$img" --format '{{json .Manifest.Digest}}' 2>/dev/null); then
+    echo "error"
+    return
+  fi
+  remote_digest=$(printf '%s' "$remote_raw" | tr -d '"[:space:]')
+  if [[ "$remote_digest" != sha256:* ]]; then
     echo "error"
     return
   fi
@@ -1867,66 +2173,65 @@ update_service() {
   local backup_file=""
   local update_error=false
 
-  {
-    backup_file=$(backup_volumes "$service")
+  case "$MODE" in
+    run)
+      if [ -z "$IMAGE" ]; then
+        echo -e "${RED}❌ IMAGE no está definida para $service${NC}"
+        update_error=true
+      else
+        echo -e "⬇️ ${CYAN}Descargando imagen $IMAGE...${NC}"
+        local pull_tmp pull_rc pull_output
+        pull_tmp=$(mktemp)
+        docker pull "$IMAGE" 2>&1 | tee "$pull_tmp"
+        pull_rc=${PIPESTATUS[0]}
+        pull_output=$(cat "$pull_tmp")
+        rm -f "$pull_tmp"
 
-    case "$MODE" in
-      run)
-        if [ -z "$IMAGE" ]; then
-          echo -e "${RED}❌ IMAGE no está definida para $service${NC}"
+        if [ "$pull_rc" -ne 0 ]; then
+          echo -e "${RED}❌ Error al descargar la imagen $IMAGE${NC}"
           update_error=true
+        elif [[ "$pull_output" == *"Image is up to date"* ]] && [ "$force" != "true" ]; then
+          echo -e "✅ ${GREEN}$NAME ya está en su última versión, se omite reinicio.${NC}"
         else
-          echo -e "⬇️ ${CYAN}Descargando imagen $IMAGE...${NC}"
-          local pull_tmp
-          pull_tmp=$(mktemp)
-          if docker pull "$IMAGE" 2>&1 | tee "$pull_tmp"; then
-            PULL_OUTPUT=$(cat "$pull_tmp")
-            rm -f "$pull_tmp"
-
-            if echo "$PULL_OUTPUT" | grep -q "Image is up to date" && [ "$force" != "true" ]; then
-              echo -e "✅ ${GREEN}$NAME ya está en su última versión, se omite reinicio.${NC}"
-            else
-              if [ "$force" = "true" ] && echo "$PULL_OUTPUT" | grep -q "Image is up to date"; then
-                echo -e "🔄 ${YELLOW}Recreando contenedor $NAME con la configuración actual...${NC}"
-              else
-                echo -e "🚀 ${GREEN}Nueva versión descargada con éxito. Actualizando $NAME...${NC}"
-              fi
-
-              if [ -n "$CONTAINER_NAME" ]; then
-                echo "🛑 Parando contenedor $CONTAINER_NAME..."
-                docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
-                docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
-              fi
-
-              echo "🚀 Arrancando contenedor..."
-              local restart_flag="--restart=unless-stopped"
-              if [[ "$EXTRA_ARGS" == *"--restart"* ]]; then
-                restart_flag=""
-              fi
-              docker run -d \
-                $PORTS \
-                ${CONTAINER_NAME:+--name "$CONTAINER_NAME"} \
-                $restart_flag \
-                $VOLUMES \
-                $EXTRA_ARGS \
-                "$IMAGE" \
-                $COMMAND
-            fi
+          if [[ "$pull_output" == *"Image is up to date"* ]]; then
+            echo -e "🔄 ${YELLOW}Recreando contenedor $NAME con la configuración actual...${NC}"
           else
-            rm -f "$pull_tmp"
-            echo -e "${RED}❌ Error al descargar la imagen $IMAGE${NC}"
-            update_error=true
+            echo -e "🚀 ${GREEN}Nueva versión descargada con éxito. Actualizando $NAME...${NC}"
           fi
-        fi
-        ;;
 
-      compose)
-        local service_dir="$BASE_DIR/$service"
-        echo -e "📂 Navegando a $service_dir..."
-        (
-          cd "$service_dir"
-          echo "⬇️ Descargando imágenes del stack compose..."
-          docker compose pull
+          # Backup en frío: se para el contenedor antes del tar (se iba a recrear igualmente)
+          if [ "$DO_BACKUP" = true ]; then
+            if [ -n "$CONTAINER_NAME" ]; then
+              echo "🛑 Parando contenedor $CONTAINER_NAME para el backup..."
+              docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+            fi
+            backup_file=$(backup_volumes "$service")
+          fi
+
+          recreate_run_container || update_error=true
+        fi
+      fi
+      ;;
+
+    compose)
+      local service_dir="$BASE_DIR/$service"
+      echo -e "📂 Navegando a $service_dir..."
+      local ids_before ids_after
+      ids_before=$(compose_image_ids "$service_dir")
+      echo "⬇️ Descargando imágenes del stack compose..."
+      if ! ( cd "$service_dir" || exit 1; docker compose pull ); then
+        echo -e "${RED}❌ Error al descargar las imágenes del stack $service${NC}"
+        update_error=true
+      else
+        ids_after=$(compose_image_ids "$service_dir")
+        # Backup en frío solo si va a haber cambios (imágenes nuevas o recreación forzada)
+        if [ "$DO_BACKUP" = true ] && { [ "$force" = "true" ] || [ "$ids_before" != "$ids_after" ]; }; then
+          echo "🛑 Deteniendo stack para el backup..."
+          ( cd "$service_dir" || exit 1; docker compose stop ) || true
+          backup_file=$(backup_volumes "$service")
+        fi
+        if ! (
+          cd "$service_dir" || exit 1
           if [ "$force" = "true" ]; then
             echo "🚀 Recreando y actualizando stack con docker compose..."
             docker compose up -d --force-recreate --remove-orphans
@@ -1934,35 +2239,35 @@ update_service() {
             echo "🚀 Actualizando stack con docker compose (sin tiempo de corte)..."
             docker compose up -d --remove-orphans
           fi
-        )
-        ;;
+        ); then
+          echo -e "${RED}❌ Error al desplegar el stack $service con docker compose${NC}"
+          update_error=true
+        fi
+      fi
+      ;;
 
-      *)
-        echo -e "${RED}❌ MODE inválido ($MODE) en $service${NC}"
-        update_error=true
-        ;;
-    esac
+    *)
+      echo -e "${RED}❌ MODE inválido ($MODE) en $service${NC}"
+      update_error=true
+      ;;
+  esac
 
-    if [ "$no_prune" != "true" ]; then
+  if [ "$update_error" = false ]; then
+    if [ "$no_prune" = "false" ]; then
       echo "🧹 Limpiando imágenes antiguas..."
       docker image prune -f
     fi
-
-    if [ "$update_error" = false ]; then
-      echo -e "✅ ${GREEN}$NAME actualizado correctamente${NC}"
-      if [ "$DO_BACKUP" = true ] && [ -n "$backup_file" ] && [ -f "$backup_file" ]; then
-        echo "🗑 Eliminando backup temporal $backup_file (actualización OK)"
-        rm -f "$backup_file"
-      fi
+    echo -e "✅ ${GREEN}$NAME actualizado correctamente${NC}"
+    if [ -n "$backup_file" ] && [ -f "$backup_file" ]; then
+      echo "🗑 Eliminando backup temporal $backup_file (actualización OK)"
+      rm -f "$backup_file"
     fi
-
-  } || {
+  else
     echo -e "${RED}❌ Error actualizando $NAME${NC}"
-    update_error=true
-    if [ "$DO_BACKUP" = true ] && [ -n "$backup_file" ] && [ -f "$backup_file" ]; then
+    if [ -n "$backup_file" ] && [ -f "$backup_file" ]; then
       echo -e "⚠️ ${YELLOW}Backup retenido en $backup_file por error${NC}"
     fi
-  }
+  fi
 
   if [ "$update_error" = true ]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR - $NAME ($service)" >> "$LOG_FILE"
@@ -1972,11 +2277,28 @@ update_service() {
     SESSION_RESULTS+=("$NAME ($service): OK")
   fi
   invalidate_docker_state_cache
+  [ "$update_error" = false ]
+}
+
+# IDs locales de las imágenes de un stack compose (para detectar si el pull trajo cambios)
+compose_image_ids() {
+  local service_dir="$1"
+  local img
+  (cd "$service_dir" 2>/dev/null && docker compose config --images 2>/dev/null) | while read -r img; do
+    [ -z "$img" ] && continue
+    docker image inspect -f '{{.Id}}' "$img" 2>/dev/null || echo "ausente:$img"
+  done
 }
 
 # ─────────────────────────────
 # Mostrar Comandos de Arranque
 # ─────────────────────────────
+# Enmascara valores de claves sensibles (CLAVE=valor) leídos por stdin
+SECRET_KEY_REGEX='(SECRET|TOKEN|PASS|PWD|HASH|KEY)'
+mask_secrets() {
+  sed -E 's/([A-Za-z0-9_]*'"$SECRET_KEY_REGEX"'[A-Za-z0-9_]*=)[^[:space:]]+/\1****/Ig'
+}
+
 show_command() {
   local service="$1"
   load_service_config "$service" || return 1
@@ -1990,36 +2312,38 @@ show_command() {
     return
   fi
 
-  echo "docker run -d \\"
-  if [ -n "$PORTS" ]; then
-    while read -r line; do
-      [ -n "$line" ] && echo "  $line \\"
-    done <<< "$PORTS"
-  fi
+  {
+    echo "docker run -d \\"
+    if [ -n "$PORTS" ]; then
+      while read -r line; do
+        [ -n "$line" ] && echo "  $line \\"
+      done <<< "$PORTS"
+    fi
 
-  [ -n "$CONTAINER_NAME" ] && echo "  --name $CONTAINER_NAME \\"
-  if [[ "$EXTRA_ARGS" != *"--restart"* ]]; then
-    echo "  --restart=unless-stopped \\"
-  fi
+    [ -n "$CONTAINER_NAME" ] && echo "  --name $CONTAINER_NAME \\"
+    if [[ "$EXTRA_ARGS" != *"--restart"* ]]; then
+      echo "  --restart=unless-stopped \\"
+    fi
 
-  if [ -n "$VOLUMES" ]; then
-    while read -r line; do
-      [ -n "$line" ] && echo "  $line \\"
-    done <<< "$VOLUMES"
-  fi
+    if [ -n "$VOLUMES" ]; then
+      while read -r line; do
+        [ -n "$line" ] && echo "  $line \\"
+      done <<< "$VOLUMES"
+    fi
 
-  if [ -n "$EXTRA_ARGS" ]; then
-    while read -r line; do
-      [ -n "$line" ] && echo "  $line \\"
-    done <<< "$EXTRA_ARGS"
-  fi
+    if [ -n "$EXTRA_ARGS" ]; then
+      while read -r line; do
+        [ -n "$line" ] && echo "  $line \\"
+      done <<< "$EXTRA_ARGS"
+    fi
 
-  if [ -n "$COMMAND" ]; then
-    echo "  $IMAGE \\"
-    echo "  $COMMAND"
-  else
-    echo "  $IMAGE"
-  fi
+    if [ -n "$COMMAND" ]; then
+      echo "  $IMAGE \\"
+      echo "  $COMMAND"
+    else
+      echo "  $IMAGE"
+    fi
+  } | mask_secrets
 }
 
 # ─────────────────────────────
@@ -2034,7 +2358,8 @@ show_help() {
   echo -e "monitorización de servicios en contenedores individuales (${YELLOW}docker run${NC}) o stacks (${YELLOW}docker compose${NC})."
   echo ""
   echo -e "${CYAN}📌 OPCIONES DEL MENÚ INTERACTIVO:${NC}"
-  echo -e "  ${GREEN}1..N${NC}   Actualizar/recrear un servicio específico (pregunta si forzar recreación)."
+  echo -e "  ${GREEN}1..N${NC}   Número o nombre de un servicio: abre directamente su menú de acciones"
+  echo -e "         (iniciar, detener, reiniciar, recrear, actualizar o cambiar política de reinicio)."
   echo -e "  ${GREEN}a${NC}      Actualizar TODOS los servicios configurados en el directorio."
   echo -e "  ${GREEN}c${NC}      Comprobar qué servicios tienen actualización remota (mediante SHA256 digest)."
   echo -e "         └─> Subopción ${YELLOW}u${NC}: Actualiza directamente y sin esperas los que tengan versión nueva."
@@ -2053,7 +2378,7 @@ show_help() {
   echo -e "${CYAN}💻 USO DIRECTO POR LÍNEA DE COMANDOS (CLI):${NC}"
   echo -e "  ${YELLOW}./update.sh -c | --check${NC}                 Comprobar actualizaciones en todos los servicios."
   echo -e "  ${YELLOW}./update.sh -a | --all [-f]${NC}              Actualizar todos los servicios (-f fuerza recreación)."
-  echo -e "  ${YELLOW}./update.sh <servicio> [-f]${NC}              Actualizar un servicio concreto por su carpeta."
+  echo -e "  ${YELLOW}./update.sh <servicio> [-f]${NC}              Actualizar un servicio concreto por su carpeta (sin prune)."
   echo -e "  ${YELLOW}./update.sh --start <servicio>${NC}           Iniciar un contenedor o stack."
   echo -e "  ${YELLOW}./update.sh --stop <servicio>${NC}            Detener un contenedor o stack."
   echo -e "  ${YELLOW}./update.sh --restart <servicio>${NC}         Reiniciar un contenedor o stack."
@@ -2174,7 +2499,7 @@ elif [ -n "$1" ]; then
 
   resolved=$(resolve_service_input "$TARGET_ARG")
   if [ -n "$resolved" ]; then
-    update_service "$resolved" false "$CLI_FORCE"
+    update_service "$resolved" true "$CLI_FORCE"
     exit 0
   else
     echo -e "${RED}❌ Servicio no encontrado: '$TARGET_ARG'${NC}"
@@ -2224,6 +2549,7 @@ while true; do
     echo ""
     echo -e "${CYAN}── ⏯️ Control de Contenedores (Local) ──${NC}"
     echo -e " ${YELLOW}p${NC}) 🕹️ Ciclo de Vida: Iniciar, Detener, Reiniciar o Recrear"
+    echo -e " ${YELLOW}1..N${NC}) 🎯 Número o nombre de un servicio → sus acciones (iniciar, detener, actualizar...)"
     echo ""
     echo -e "${CYAN}── 📊 Monitorización y Diagnóstico ──${NC}"
     echo -e " ${YELLOW}l${NC}) 📋 Ver logs de un servicio en vivo (tail -f)"
@@ -2335,16 +2661,8 @@ while true; do
     *)
       resolved=$(resolve_service_input "$OPTION")
       if [ -n "$resolved" ]; then
-        selected_svc="$resolved"
-        load_service_config "$selected_svc"
-        echo ""
-        echo -e "🎯 Servicio seleccionado: ${GREEN}$NAME${NC} (${GRAY}$selected_svc${NC})"
-        read -rp "🔄 ¿Deseas forzar la recreación/reinicio del contenedor aunque no haya nueva imagen? (s/N): " FORCE_OPT
-        force_val=false
-        if [[ "$FORCE_OPT" =~ ^[sS]$ ]]; then
-          force_val=true
-        fi
-        update_service "$selected_svc" false "$force_val"
+        # Número o nombre de servicio: submenú de acciones (igual que 'p' tras elegir servicio)
+        select_lifecycle_menu "$resolved"
       else
         echo -e "${RED}❌ Opción o servicio no reconocido: '$OPTION'${NC}"
       fi

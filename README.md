@@ -41,10 +41,11 @@ docker/
 
 4. **🎯 Selección Flexible de Servicios**:
    - En cualquier menú o comando CLI, los servicios se pueden seleccionar por su **número de índice** (`1..N`), su **carpeta exacta**, o mediante **búsqueda por nombre descriptivo** (`resolve_service_input`).
+   - En el menú principal, escribir el número o nombre de un servicio abre directamente su submenú de acciones (el mismo que `p` tras elegir servicio).
 
 5. **⏯️ Ciclo de Vida Integral (Start / Stop / Restart / Recreate)**:
    - Control individual o masivo sobre todos los servicios con un solo comando o selección.
-   - **🔨 Recrear contenedor / stack (`recreate`)**: En modo Compose fuerza la reconstrucción limpia (`docker compose up -d --force-recreate --remove-orphans`) aplicando de inmediato cambios en variables de entorno o volúmenes; en modo run destruye el contenedor previo y lo recrea con la configuración actualizada.
+   - **🔨 Recrear contenedor / stack (`recreate`)**: En modo Compose fuerza la reconstrucción limpia (`docker compose up -d --force-recreate --remove-orphans`) aplicando de inmediato cambios en variables de entorno o volúmenes; en modo run renombra el contenedor previo a `<nombre>_old`, crea el nuevo y solo entonces elimina el anterior; si `docker run` falla, borra el nuevo y restaura y arranca el anterior (rollback).
    - Atajos directos para todos los servicios a la vez: `sa` (start-all), `ra` (restart-all), `ca` (recreate-all), `ta` (stop-all) y `pa` (policy-all).
 
 6. **⚡ Actualización en Caliente Sin Tiempo de Corte (Zero-Downtime)**:
@@ -61,11 +62,13 @@ docker/
 
 10. **💾 Copias de Seguridad Automatizadas y Restauración (Rollback)**:
     - Compatible tanto con contenedores individuales (`MODE="run"`) como con stacks (`MODE="compose"`).
-    - Si `DO_BACKUP=true`, realiza un backup comprimido `.tar.gz` antes de actualizar.
+    - Si `DO_BACKUP=true`, realiza un backup comprimido `.tar.gz` antes de actualizar, con el contenedor/stack ya detenido (solo cuando realmente se va a recrear). Si la actualización falla, el backup se conserva.
+    - Las rutas se guardan relativas a `/` (`tar -C /`) y se restauran en su ubicación original; los backups del formato antiguo se siguen detectando y restaurando.
+    - Los volúmenes con nombre y los bind mounts externos (en compose) no se incluyen: el script avisa de ellos. En el backup manual (`k`) se ofrece detener temporalmente los servicios.
     - **Restaurador integrado**: Permite listar e intentar restaurar backups desde `$HOME/docker_backups`.
 
 11. **🆕 Asistente y Generador Automático de Servicios**:
-    - Generación automática pegando un comando `docker run` completo.
+    - Generación automática pegando un comando `docker run` completo (se analiza sin ejecutar nada). Los volúmenes con ruta absoluta del host (`/mnt/...`, `/home/...`, `~/...`) conservan su ubicación real, pero esa ruta se guarda en el `.env` del servicio como `<SERVICIO>_<CARPETA>_DIR` y en `config.sh` queda `${VAR}`; los relativos, `$PWD` o volúmenes con nombre se mapean a `${USER_HOME}/<svc>/config/<nombre del destino>` (sin expandir). Las variables `-e` sensibles (PASS, TOKEN, SECRET, KEY, HASH) también van al `.env`. Así `config.sh` y `docker-compose.yml`, que son lo único que se versiona, no contienen rutas personales ni secretos. Lo mismo aplica al asistente paso a paso, y la plantilla de compose usa `${DATA_DIR}` definido en `.env`.
     - Asistente guiado interactivo paso a paso para crear servicios `docker run` o `docker compose`.
 
 ---
@@ -88,6 +91,7 @@ Ejecuta el script sin parámetros para abrir la interfaz interactiva:
 
 ── ⏯️ Control de Contenedores (Local) ──
  p) 🕹️ Ciclo de Vida: Iniciar, Detener, Reiniciar, Recrear o Restart Policy
+ 1..N) 🎯 Número o nombre de un servicio → sus acciones (iniciar, detener, actualizar...)
 
 ── 📊 Monitorización y Diagnóstico ──
  l) 📋 Ver logs de un servicio en vivo (tail -f)
@@ -159,6 +163,7 @@ Puedes invocar todas las funciones directamente mediante argumentos para automat
 # Actualizar un único servicio específico por su carpeta o índice
 ./update.sh <servicio>
 ./update.sh -f <servicio>  # Forzar recreación
+# (no ejecuta 'docker image prune'; la limpieza se hace en las actualizaciones masivas o con -b)
 
 # Monitor de recursos en vivo (CPU / Memoria / Red)
 ./update.sh -m        # o ./update.sh --stats
@@ -167,7 +172,7 @@ Puedes invocar todas las funciones directamente mediante argumentos para automat
 ./update.sh -l <servicio>
 
 # Mostrar comandos de arranque de todos los servicios
-./update.sh -s        # o ./update.sh --show
+./update.sh -s        # o ./update.sh --show (valores sensibles enmascarados)
 
 # Menú de limpieza y mantenimiento
 ./update.sh -b        # o ./update.sh --clean
