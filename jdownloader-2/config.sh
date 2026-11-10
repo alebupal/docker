@@ -11,7 +11,7 @@ PORTS="
 "
 
 VOLUMES="
--v ${USER_HOME}/jdownloader-2/config:/config:rw
+-v ${USER_HOME}/config:/config:rw
 -v ${DOWNLOADS_DIR}:/output:rw
 "
 
