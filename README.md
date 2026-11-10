@@ -45,11 +45,15 @@ docker/
 
 5. **⏯️ Ciclo de Vida Integral (Start / Stop / Restart / Recreate)**:
    - Control individual o masivo sobre todos los servicios con un solo comando o selección.
-   - **🔨 Recrear contenedor / stack (`recreate`)**: En modo Compose fuerza la reconstrucción limpia (`docker compose up -d --force-recreate --remove-orphans`) aplicando de inmediato cambios en variables de entorno o volúmenes; en modo run renombra el contenedor previo a `<nombre>_old`, crea el nuevo y solo entonces elimina el anterior; si `docker run` falla, borra el nuevo y restaura y arranca el anterior (rollback).
+   - **🔨 Recrear contenedor / stack (`recreate`)**: En modo Compose fuerza la reconstrucción limpia (`docker compose up -d --force-recreate --remove-orphans`) aplicando de inmediato cambios en variables de entorno o volúmenes; en modo run renombra el contenedor previo a `<nombre>_old`, crea el nuevo y solo elimina el anterior si el nuevo pasa la **comprobación de salud**; si `docker run` falla o el nuevo no está sano, muestra sus últimos logs, lo borra y restaura y arranca el anterior (rollback).
    - Atajos directos para todos los servicios a la vez: `sa` (start-all), `ra` (restart-all), `ca` (recreate-all), `ta` (stop-all) y `pa` (policy-all).
 
 6. **⚡ Actualización en Caliente Sin Tiempo de Corte (Zero-Downtime)**:
    - En servicios Compose, utiliza `docker compose up -d --remove-orphans`, actualizando y recreando únicamente los contenedores con nuevas imágenes sin destruir redes ni provocar caídas de servicio.
+
+   - **🩺 Comprobación de salud tras actualizar/recrear**: durante `HEALTH_WAIT` segundos (15 por defecto) se comprueba con `docker inspect` que los contenedores siguen en marcha y sin reinicios (`Running`, `Restarting`, `RestartCount`); si la imagen tiene `HEALTHCHECK`, se espera además a `healthy` hasta `HEALTH_TIMEOUT` segundos (90 por defecto). Ambos se pueden fijar por servicio en su `config.sh` (`HEALTH_WAIT=0` desactiva la comprobación) o para toda la ejecución (`HEALTH_WAIT=30 ./update.sh -a`).
+     - **Modo run**: si no está sano, se muestran las últimas líneas de `docker logs`, se borra el nuevo y se restaura el `<nombre>_old` (si no había anterior, se deja el nuevo para revisarlo). La actualización queda como ERROR.
+     - **Modo compose**: se comprueban todos los contenedores del proyecto (`docker compose ps -a`; los de una sola ejecución que terminan con código 0 cuentan como correctos). Si alguno no está sano se muestran sus logs y se marca ERROR, **sin rollback automático**: en stacks con base de datos (p. ej. Immich) la nueva versión puede haber migrado ya el esquema y volver atrás a ciegas sería peor. Como con error no se hace `docker image prune`, las imágenes anteriores se conservan y el script imprime los `docker tag <id_anterior> <imagen>` + `docker compose up -d` para volver a ellas a mano.
 
 7. **📊 Monitor de Recursos en Vivo (`docker stats`)**:
    - Inspecciona en tiempo real el consumo de CPU, memoria RAM, I/O de red e I/O de disco de todos los contenedores en ejecución.
@@ -68,7 +72,7 @@ docker/
     - **Restaurador integrado**: Permite listar e intentar restaurar backups desde `$HOME/docker_backups`.
 
 11. **🆕 Asistente y Generador Automático de Servicios**:
-    - Generación automática pegando un comando `docker run` completo (se analiza sin ejecutar nada). Los volúmenes con ruta absoluta del host (`/mnt/...`, `/home/...`, `~/...`) conservan su ubicación real, pero esa ruta se guarda en el `.env` del servicio como `<SERVICIO>_<CARPETA>_DIR` y en `config.sh` queda `${VAR}`; los relativos, `$PWD` o volúmenes con nombre se mapean a `${USER_HOME}/config/<nombre del destino>` y el `.env` recibe `USER_HOME=<carpeta del servicio>`. Las variables `-e` sensibles (PASS, TOKEN, SECRET, KEY, HASH) también van al `.env`. Así `config.sh` y `docker-compose.yml`, que son lo único que se versiona, no contienen rutas personales ni secretos. Lo mismo aplica al asistente paso a paso, y la plantilla de compose usa `${DATA_DIR}` definido en `.env`.
+    - Generación automática pegando un comando `docker run` completo (se analiza sin ejecutar nada). Los volúmenes con ruta absoluta del host (`/mnt/...`, `/home/...`, `~/...`) conservan su ubicación real, pero esa ruta se guarda en el `.env` del servicio como `<SERVICIO>_<CARPETA>_DIR` y en `config.sh` queda `${VAR}`; los relativos, `$PWD` o volúmenes con nombre se mapean a `${USER_HOME}/config/<nombre del destino>` y el `.env` recibe `USER_HOME=<carpeta del servicio>`. Las variables `-e` sensibles (PASS, TOKEN, SECRET, KEY, HASH) también van al `.env`. Los argumentos con espacios se escriben entre comillas simples en `config.sh` (`-e 'MSG=hola mundo'`), y las variables del `.env` cuyo valor tiene espacios, comillas o `\` se pasan como `-e VAR` (docker toma el valor del `.env`, que se exporta). Así `config.sh` y `docker-compose.yml`, que son lo único que se versiona, no contienen rutas personales ni secretos. Lo mismo aplica al asistente paso a paso, y la plantilla de compose usa `${DATA_DIR}` definido en `.env`.
 
 > **Convención de rutas:** el `.env` de cada servicio en modo `run` define `USER_HOME` como la carpeta del propio servicio, y su `config.sh` usa rutas cortas (`${USER_HOME}/config`). Como el `.env` se carga antes que `config.sh`, las rutas personales quedan solo en el `.env`.
     - Asistente guiado interactivo paso a paso para crear servicios `docker run` o `docker compose`.
@@ -228,7 +232,13 @@ EXTRA_ARGS="
 COMMAND=""
 
 DO_BACKUP=false
+
+# (Opcional) Comprobación de salud tras actualizar/recrear (por defecto 15 y 90 s)
+# HEALTH_WAIT=30      # 0 = no comprobar
+# HEALTH_TIMEOUT=180
 ```
+
+> **Espacios y comillas:** `PORTS`, `VOLUMES`, `EXTRA_ARGS` y `COMMAND` se dividen en argumentos por espacios y saltos de línea, pero respetando comillas (como el shell, sin ejecutar nada). Como el bloque ya va entre comillas dobles, usa **comillas simples** dentro: `-e 'MSG=hola mundo'`, `-v '${DATOS_DIR}:/datos'` (si la ruta del `.env` tiene espacios) o `COMMAND="sh -c 'echo hola; sleep 1'"`. Sin comillas todo funciona igual que siempre.
 
 ### Ejemplo B: Servicio `docker compose` (`MODE="compose"`)
 ```bash
@@ -241,6 +251,17 @@ IMAGE="mi_imagen:latest" # Opcional, para comprobaciones remotas de versión
 DO_BACKUP=false
 ```
 *(Nota: Para `MODE="compose"`, debe existir el archivo `docker-compose.yml` en la misma carpeta, definiendo su directiva `restart: unless-stopped`).*
+
+### Versiones fijadas (imágenes críticas)
+
+Vaultwarden, Nginx Proxy Manager e Immich usan una **etiqueta exacta** en vez de `latest`/`release`, para que una actualización masiva (`u`, `-a`) no salte de versión sin revisar las notas de cambios. Con etiqueta fija la comprobación (`c`) sigue funcionando: compara el digest local con el remoto de **esa** etiqueta, así que indicará "Al día" salvo que se republique la misma versión. Para subir de versión:
+
+1. Revisa las notas de la versión nueva (cambios incompatibles, migraciones) y, si hace falta, haz backup (`k`).
+2. Cambia la etiqueta:
+   - **Vaultwarden**: `IMAGE="vaultwarden/server:X.Y.Z"` en `vaultwarden/config.sh` ([releases](https://github.com/dani-garcia/vaultwarden/releases)).
+   - **Nginx Proxy Manager**: `image:` en `nginx-proxy-manager/docker-compose.yml` **y** `IMAGE` en su `config.sh` ([releases](https://github.com/NginxProxyManager/nginx-proxy-manager/releases)).
+   - **Immich**: `IMMICH_VERSION=vX.Y.Z` en `immich-app/.env` (no se versiona; el compose exige que exista). Usa el `docker-compose.yml` de esa versión si cambió ([releases](https://github.com/immich-app/immich/releases)) y no saltes versiones mayores sin leer su guía.
+3. Actualiza el servicio (`./update.sh <servicio>`): descarga la etiqueta nueva, recrea y pasa la comprobación de salud.
 
 ---
 

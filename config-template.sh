@@ -24,6 +24,10 @@ MODE="run"
 CONTAINER_NAME="mi_contenedor"
 IMAGE="nginx:latest"
 
+# PORTS / VOLUMES / EXTRA_ARGS / COMMAND se dividen en argumentos por espacios y saltos de
+# línea respetando comillas (sin ejecutar nada). Para un valor con espacios usa comillas
+# SIMPLES dentro del bloque "...": -e 'MSG=hola mundo'  o  -v '${DATOS_DIR}:/datos'
+
 # Puertos mapeados (opcional)
 PORTS="
 -p 8080:80
@@ -44,7 +48,14 @@ EXTRA_ARGS="
 "
 
 # Comando / Argumentos tras la imagen (opcional, ej: "--setup ejemplo" o "redis-server --appendonly yes")
+# Con espacios dentro de un argumento: COMMAND="sh -c 'echo hola; sleep 1'"
 # COMMAND=""
+
+# Comprobación de salud tras actualizar/recrear (opcional; por defecto 15 y 90 s).
+# HEALTH_WAIT: segundos que debe seguir en marcha sin reiniciarse (0 = no comprobar).
+# HEALTH_TIMEOUT: tope esperando 'healthy' si la imagen define HEALTHCHECK.
+# HEALTH_WAIT=15
+# HEALTH_TIMEOUT=90
 
 # =============================================================================
 # CONFIGURACIÓN PARA MODE="compose" (Tipo compose/composer)

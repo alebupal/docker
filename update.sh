@@ -13,6 +13,7 @@
 # - Verificación previa de requisitos (docker, compose, tar, gzip).
 # - Visor de logs en tiempo real (docker logs / docker compose logs).
 # - Sistema de restauración de backups (rollback).
+# - Comprobación de salud tras actualizar/recrear (rollback automático en modo run).
 # - Limpieza automática de backups antiguos (>7 días).
 # - Muestra comandos exactos de arranque para docker run o docker compose.
 # =============================================================================
@@ -102,6 +103,8 @@ reset_config_vars() {
   COMMAND=""
   DO_BACKUP=false
   SERVICE_BACKUP_DIR=""
+  HEALTH_WAIT=""
+  HEALTH_TIMEOUT=""
 }
 
 # Variables globales del script que ni el .env ni el config.sh de un servicio pueden pisar
@@ -412,34 +415,225 @@ view_service_logs() {
 }
 
 # ─────────────────────────────
+# Tokenizador de argumentos (PORTS/VOLUMES/EXTRA_ARGS/COMMAND)
+# ─────────────────────────────
+# Uso: split_args NOMBRE_ARRAY "cadena"
+# Divide la cadena en argumentos respetando comillas simples/dobles y '\' como el shell,
+# SIN eval (no se expande nada ni se ejecuta $(...) o `...`). Sin comillas ni '\' equivale
+# exactamente a la división por espacios de siempre (y sin globbing: '*' o '?' son literales).
+split_args() {
+  local -n _split_out="$1"
+  local _str="$2"
+  _split_out=()
+  [[ "$_str" =~ ^[[:space:]]*$ ]] && return 0
+
+  local _glob_was_off=false
+  [[ $- == *f* ]] && _glob_was_off=true
+
+  if [[ "$_str" != *[\'\"\\]* ]]; then
+    # Sin comillas: división por espacios/tabuladores/saltos de línea (comportamiento histórico)
+    local IFS=$' \t\n'
+    set -f
+    # shellcheck disable=SC2206
+    _split_out=($_str)
+    [ "$_glob_was_off" = false ] && set +f
+    return 0
+  fi
+
+  # Con comillas: mismo tokenizador que el asistente (python3 shlex, fallback xargs)
+  local _tok_file
+  _tok_file=$(mktemp)
+  if command -v python3 >/dev/null 2>&1 && \
+     printf '%s' "$_str" | python3 -c 'import shlex,sys; sys.stdout.write("".join(t + "\0" for t in shlex.split(sys.stdin.read())))' > "$_tok_file" 2>/dev/null; then
+    mapfile -d '' -t _split_out < "$_tok_file"
+  elif printf '%s' "$_str" | xargs printf '%s\0' > "$_tok_file" 2>/dev/null; then
+    mapfile -d '' -t _split_out < "$_tok_file"
+  else
+    echo -e "${YELLOW}⚠️ Comillas sin cerrar en la configuración de ${NAME:-servicio}; se divide por espacios.${NC}" >&2
+    local IFS=$' \t\n'
+    set -f
+    # shellcheck disable=SC2206
+    _split_out=($_str)
+    [ "$_glob_was_off" = false ] && set +f
+  fi
+  rm -f "$_tok_file"
+  return 0
+}
+
+# ─────────────────────────────
 # docker run común (modo run) con la configuración cargada
 # ─────────────────────────────
-# PORTS/VOLUMES/EXTRA_ARGS/COMMAND son strings que se expanden por palabras a propósito
-# (formato de config.sh); se desactiva el globbing para que '*' o '?' no se expandan.
+# PORTS/VOLUMES/EXTRA_ARGS/COMMAND se tokenizan con split_args: se dividen por espacios y,
+# si se escriben con comillas en config.sh (p.ej. -e 'MSG=a b'), se respetan.
+# Imprime por stdout el ID del contenedor creado (salida de 'docker run -d').
 docker_run_service() {
   local restart_flag="--restart=unless-stopped"
   if [[ "$EXTRA_ARGS" == *"--restart"* ]]; then
     restart_flag=""
   fi
-  local glob_was_off=false
-  [[ $- == *f* ]] && glob_was_off=true
-  set -f
-  # shellcheck disable=SC2086
+  local run_ports=() run_volumes=() run_extra=() run_cmd=()
+  split_args run_ports "$PORTS"
+  split_args run_volumes "$VOLUMES"
+  split_args run_extra "$EXTRA_ARGS"
+  split_args run_cmd "$COMMAND"
   docker run -d \
-    $PORTS \
+    "${run_ports[@]}" \
     ${CONTAINER_NAME:+--name "$CONTAINER_NAME"} \
-    $restart_flag \
-    $VOLUMES \
-    $EXTRA_ARGS \
+    ${restart_flag:+"$restart_flag"} \
+    "${run_volumes[@]}" \
+    "${run_extra[@]}" \
     "$IMAGE" \
-    $COMMAND
-  local rc=$?
-  [ "$glob_was_off" = false ] && set +f
-  return $rc
+    "${run_cmd[@]}"
 }
 
-# Recrea el contenedor (modo run) con rollback: el anterior se renombra a <nombre>_old
-# y solo se elimina si el nuevo arranca; si 'docker run' falla se restaura el anterior.
+# ─────────────────────────────
+# Comprobación de salud tras (re)crear contenedores
+# ─────────────────────────────
+# Ajustables por servicio en su config.sh (HEALTH_WAIT=0 desactiva la comprobación):
+#  - HEALTH_WAIT:    segundos que el contenedor debe seguir en marcha sin reiniciarse.
+#  - HEALTH_TIMEOUT: tope total (s) esperando 'healthy' si la imagen define HEALTHCHECK.
+# Valores por defecto (también se pueden fijar para toda la ejecución: HEALTH_WAIT=30 ./update.sh)
+DEFAULT_HEALTH_WAIT=15
+DEFAULT_HEALTH_TIMEOUT=90
+[[ "${HEALTH_WAIT:-}" =~ ^[0-9]+$ ]] && DEFAULT_HEALTH_WAIT=$HEALTH_WAIT
+[[ "${HEALTH_TIMEOUT:-}" =~ ^[0-9]+$ ]] && DEFAULT_HEALTH_TIMEOUT=$HEALTH_TIMEOUT
+HEALTH_POLL="${HEALTH_POLL:-3}"            # intervalo de sondeo (s)
+HEALTH_LOG_LINES="${HEALTH_LOG_LINES:-30}" # líneas de 'docker logs' a mostrar si falla
+HEALTH_FAILED=()                           # contenedores no sanos de la última comprobación
+declare -A HEALTH_BASELINE=()              # RestartCount previo de contenedores no recreados
+
+# Valor entero de un ajuste de salud del servicio o su valor por defecto
+health_setting() {
+  local value="${!1}"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    echo "$value"
+  else
+    echo "$2"
+  fi
+}
+
+container_display_name() {
+  local n
+  n=$(docker inspect -f '{{.Name}}' "$1" 2>/dev/null)
+  n="${n#/}"
+  echo "${n:-${1:0:12}}"
+}
+
+# Estado de salud de un contenedor: ok | wait | fail:<motivo>
+container_health_state() {
+  local c="$1"
+  local info
+  if ! info=$(docker inspect -f '{{.State.Status}}|{{.State.Restarting}}|{{.RestartCount}}|{{.State.ExitCode}}|{{.HostConfig.RestartPolicy.Name}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$c" 2>/dev/null); then
+    echo "fail:el contenedor no existe"
+    return
+  fi
+  local status restarting rcount exitcode policy health
+  IFS='|' read -r status restarting rcount exitcode policy health <<< "$info"
+  [[ "$rcount" =~ ^[0-9]+$ ]] || rcount=0
+  local baseline="${HEALTH_BASELINE[$c]:-0}"
+
+  if [ "$restarting" = "true" ]; then
+    echo "fail:reiniciándose en bucle (RestartCount=$rcount)"
+    return
+  fi
+  if [ "$rcount" -gt "$baseline" ]; then
+    echo "fail:se ha reiniciado $((rcount - baseline)) vez/veces tras arrancar"
+    return
+  fi
+  case "$status" in
+    running)
+      case "$health" in
+        ""|healthy) echo "ok" ;;
+        starting) echo "wait" ;;
+        *) echo "fail:healthcheck en estado '$health'" ;;
+      esac
+      ;;
+    exited)
+      # Contenedor de una sola ejecución (init/migración) que terminó bien y no debe reiniciarse
+      if [ "$exitcode" = "0" ] && [[ "$policy" == "" || "$policy" == "no" || "$policy" == "on-failure" ]]; then
+        echo "ok"
+      else
+        echo "fail:parado (código de salida $exitcode)"
+      fi
+      ;;
+    *)
+      echo "fail:estado '$status'"
+      ;;
+  esac
+}
+
+# Uso: wait_containers_healthy id_o_nombre...
+# Espera HEALTH_WAIT s comprobando que siguen en marcha sin reinicios y, si tienen HEALTHCHECK,
+# hasta que estén 'healthy' (máx. HEALTH_TIMEOUT s). Devuelve 1 y rellena HEALTH_FAILED si no.
+wait_containers_healthy() {
+  HEALTH_FAILED=()
+  [ $# -eq 0 ] && return 0
+  local wait_s timeout_s poll
+  wait_s=$(health_setting HEALTH_WAIT "$DEFAULT_HEALTH_WAIT")
+  timeout_s=$(health_setting HEALTH_TIMEOUT "$DEFAULT_HEALTH_TIMEOUT")
+  poll=$(health_setting HEALTH_POLL 3)
+  [ "$poll" -lt 1 ] && poll=1
+  if [ "$wait_s" -eq 0 ]; then
+    echo -e "⏭️ ${GRAY}Comprobación de salud desactivada (HEALTH_WAIT=0).${NC}"
+    return 0
+  fi
+  [ "$timeout_s" -lt "$wait_s" ] && timeout_s=$wait_s
+
+  echo -e "🩺 ${CYAN}Comprobando salud de $# contenedor(es): ${wait_s}s estable, healthcheck hasta ${timeout_s}s...${NC}"
+  local elapsed=0 c st pending=()
+  while :; do
+    pending=()
+    for c in "$@"; do
+      st=$(container_health_state "$c")
+      case "$st" in
+        fail:*)
+          HEALTH_FAILED+=("$c")
+          echo -e "   ${RED}❌ $(container_display_name "$c"): ${st#fail:}${NC}"
+          ;;
+        wait) pending+=("$c") ;;
+      esac
+    done
+    [ ${#HEALTH_FAILED[@]} -gt 0 ] && return 1
+    if [ "$elapsed" -ge "$wait_s" ] && [ ${#pending[@]} -eq 0 ]; then
+      echo -e "   ${GREEN}✓${NC} Contenedor(es) en marcha y sanos tras ${elapsed}s."
+      return 0
+    fi
+    if [ "$elapsed" -ge "$timeout_s" ]; then
+      for c in "${pending[@]}"; do
+        HEALTH_FAILED+=("$c")
+        echo -e "   ${RED}❌ $(container_display_name "$c"): no llega a 'healthy' en ${timeout_s}s${NC}"
+      done
+      return 1
+    fi
+    sleep "$poll"
+    elapsed=$((elapsed + poll))
+  done
+}
+
+# Muestra las últimas líneas de log de los contenedores no sanos (con secretos enmascarados)
+show_failed_container_logs() {
+  local c
+  for c in "$@"; do
+    echo -e "📜 ${YELLOW}Últimas ${HEALTH_LOG_LINES} líneas de log de $(container_display_name "$c"):${NC}"
+    docker logs --tail "$HEALTH_LOG_LINES" "$c" 2>&1 | mask_secrets | sed 's/^/   │ /'
+  done
+}
+
+# Restaura el contenedor anterior (<nombre>_old) tras un fallo del nuevo
+restore_old_run_container() {
+  local old_name="$1" old_image_id="$2"
+  echo -e "⏪ ${YELLOW}Rollback: restaurando contenedor anterior (imagen ${old_image_id:0:19})...${NC}"
+  if docker rename "$old_name" "$CONTAINER_NAME" >/dev/null 2>&1 && docker start "$CONTAINER_NAME" >/dev/null 2>&1; then
+    echo -e "   ${GREEN}✓${NC} Contenedor anterior $CONTAINER_NAME restaurado y arrancado."
+  else
+    echo -e "   ${RED}❌ No se pudo restaurar automáticamente. Revisa el contenedor '$old_name'.${NC}"
+  fi
+}
+
+# Recrea el contenedor (modo run) con rollback: el anterior se renombra a <nombre>_old y solo
+# se elimina si el nuevo arranca y pasa la comprobación de salud; si 'docker run' falla o el
+# nuevo no está sano (se para, se reinicia o su healthcheck no llega a 'healthy'), se borra el
+# nuevo y se restaura el anterior.
 recreate_run_container() {
   local old_name=""
   if [ -n "$CONTAINER_NAME" ] && docker container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
@@ -457,11 +651,27 @@ recreate_run_container() {
   fi
 
   echo "🚀 Arrancando contenedor $NAME..."
-  if docker_run_service; then
-    if [ -n "$old_name" ]; then
-      docker rm -f "$old_name" >/dev/null 2>&1 || true
+  local new_id
+  if new_id=$(docker_run_service); then
+    new_id=$(printf '%s\n' "$new_id" | tail -n 1)
+    echo -e "   ${GRAY}ID: ${new_id:0:12}${NC}"
+    local target="${CONTAINER_NAME:-$new_id}"
+    if wait_containers_healthy "$target"; then
+      if [ -n "$old_name" ]; then
+        docker rm -f "$old_name" >/dev/null 2>&1 || true
+      fi
+      return 0
     fi
-    return 0
+    echo -e "${RED}❌ El nuevo contenedor de $NAME no está sano.${NC}"
+    show_failed_container_logs "$target"
+    if [ -z "$old_name" ]; then
+      echo -e "⚠️ ${YELLOW}No había contenedor anterior que restaurar: se deja '$(container_display_name "$target")' para que revises sus logs.${NC}"
+      return 1
+    fi
+    echo "🗑 Eliminando el contenedor nuevo..."
+    docker rm -f "$target" >/dev/null 2>&1 || true
+    restore_old_run_container "$old_name" "$old_image_id"
+    return 1
   fi
 
   echo -e "${RED}❌ 'docker run' ha fallado para $NAME.${NC}"
@@ -469,12 +679,7 @@ recreate_run_container() {
     docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   fi
   if [ -n "$old_name" ]; then
-    echo -e "⏪ ${YELLOW}Rollback: restaurando contenedor anterior (imagen ${old_image_id:0:19})...${NC}"
-    if docker rename "$old_name" "$CONTAINER_NAME" >/dev/null 2>&1 && docker start "$CONTAINER_NAME" >/dev/null 2>&1; then
-      echo -e "   ${GREEN}✓${NC} Contenedor anterior $CONTAINER_NAME restaurado y arrancado."
-    else
-      echo -e "   ${RED}❌ No se pudo restaurar automáticamente. Revisa el contenedor '$old_name'.${NC}"
-    fi
+    restore_old_run_container "$old_name" "$old_image_id"
   fi
   return 1
 }
@@ -992,12 +1197,9 @@ perform_service_backup() {
       fi
     done < <(compose_mount_sources "$service_dir")
   elif [ -n "$VOLUMES" ]; then
-    local glob_was_off=false
-    [[ $- == *f* ]] && glob_was_off=true
-    set -f
-    local vol prev="" host_path
-    # shellcheck disable=SC2086
-    for vol in $VOLUMES; do
+    local vol prev="" host_path vol_args=()
+    split_args vol_args "$VOLUMES"
+    for vol in "${vol_args[@]}"; do
       host_path=""
       case "$prev" in
         -v|--volume) host_path="${vol%%:*}" ;;
@@ -1020,7 +1222,6 @@ perform_service_backup() {
         not_included+=("ruta inexistente: $host_path")
       fi
     done
-    [ "$glob_was_off" = false ] && set +f
   fi
 
   if [ ${#not_included[@]} -gt 0 ]; then
@@ -1372,6 +1573,7 @@ parse_docker_run_command() {
   PARSED_VOLUMES=()
   PARSED_EXTRA=()
   PARSED_COMMAND=""
+  PARSED_COMMAND_TOKENS=()
 
   local parsed_cmd_tokens=()
   local is_image_found=false
@@ -1511,9 +1713,38 @@ parse_docker_run_command() {
     PARSED_NAME=$(echo "$PARSED_CONTAINER" | sed 's/[-_]/ /g' | awk '{for(j=1;j<=NF;j++){ $j=toupper(substr($j,1,1)) substr($j,2) }}1')
   fi
 
+  PARSED_COMMAND_TOKENS=("${parsed_cmd_tokens[@]}")
   if [ ${#parsed_cmd_tokens[@]} -gt 0 ]; then
     PARSED_COMMAND="${parsed_cmd_tokens[*]}"
   fi
+}
+
+# Escribe un token para un bloque "..." de config.sh: tal cual si no tiene espacios ni comillas,
+# entre comillas simples si tiene espacios. Devuelve 1 (y lo deja tal cual) si contiene
+# caracteres que no pueden ir dentro de "..." ni de '...' (' " \ $ `).
+cfg_quote_token() {
+  local t="$1"
+  if [[ "$t" != *[[:space:]\'\"\\\$\`]* ]]; then
+    printf '%s' "$t"
+  elif [[ "$t" == *[\'\"\\\$\`]* ]]; then
+    printf '%s' "$t"
+    return 1
+  else
+    printf "'%s'" "$t"
+  fi
+}
+
+# Igual para una entrada "opción valor" / "--opción=valor" / "flag" del parser
+cfg_quote_arg() {
+  local a="$1"
+  if [[ "$a" == -* && "$a" == *" "* && "${a%% *}" != *=* ]]; then
+    local q
+    q=$(cfg_quote_token "${a#* }")
+    local rc=$?
+    printf '%s %s' "${a%% *}" "$q"
+    return $rc
+  fi
+  cfg_quote_token "$a"
 }
 
 # Transformar volúmenes a la carpeta del servicio
@@ -1554,7 +1785,12 @@ transform_service_volume() {
       [[ "$var" =~ ^[0-9] ]] && var="V_$var"
       local quoted
       printf -v quoted '%q' "$real"
-      printf '%s\t%s\n' "-v \${$var}:$dst" "$var=$quoted"
+      # Con espacios en la ruta, el argumento va entre comillas simples (update.sh las respeta)
+      if [[ "$real$dst" =~ [[:space:]] && "$real$dst" != *\'* ]]; then
+        printf '%s\t%s\n' "-v '\${$var}:$dst'" "$var=$quoted"
+      else
+        printf '%s\t%s\n' "-v \${$var}:$dst" "$var=$quoted"
+      fi
       return
     fi
 
@@ -1562,9 +1798,15 @@ transform_service_volume() {
     # servicio define USER_HOME=<carpeta del servicio> y config.sh usa rutas cortas ${USER_HOME}/...
     local uh_quoted
     printf -v uh_quoted '%q' "$USER_HOME/$s_name"
-    printf '%s\t%s\n' "-v \${USER_HOME}/config/$sub:$dst" "USER_HOME=$uh_quoted"
+    if [[ "$USER_HOME/$s_name$sub$dst" =~ [[:space:]] && "$USER_HOME/$s_name$sub$dst" != *\'* ]]; then
+      printf '%s\t%s\n' "-v '\${USER_HOME}/config/$sub:$dst'" "USER_HOME=$uh_quoted"
+    else
+      printf '%s\t%s\n' "-v \${USER_HOME}/config/$sub:$dst" "USER_HOME=$uh_quoted"
+    fi
   else
-    printf '%s\t\n' "$vol_entry"
+    local entry_q
+    entry_q=$(cfg_quote_arg "$vol_entry")
+    printf '%s\t\n' "$entry_q"
   fi
 }
 
@@ -1797,21 +2039,30 @@ create_new_service() {
     fi
 
     # Variables -e sensibles (o con caracteres que romperían el config.sh) van al .env
-    # del servicio y en config.sh se referencian como ${VAR}
-    local spaced_vars=()
+    # del servicio y en config.sh se referencian como ${VAR}; si su valor tiene espacios,
+    # comillas o '\' se pasan como '-e VAR' (docker toma el valor del .env, que se exporta).
+    # Los valores con espacios se escriben entre comillas simples (update.sh las respeta).
+    local unquotable_args=()
     local extra_block="EXTRA_ARGS=\"\""
     if [ ${#PARSED_EXTRA[@]} -gt 0 ]; then
       extra_block="EXTRA_ARGS=\""
       for e in "${PARSED_EXTRA[@]}"; do
         if [[ "$e" =~ ^(-e|--env)[=[:space:]]([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
           local e_opt="${BASH_REMATCH[1]}" e_key="${BASH_REMATCH[2]}" e_val="${BASH_REMATCH[3]}"
-          if [[ "${e_key^^}" =~ $SECRET_KEY_REGEX ]] || [[ "$e_val" == *[\$\`\"\\]* ]]; then
+          if [[ "${e_key^^}" =~ $SECRET_KEY_REGEX ]] || [[ "$e_val" == *[\$\`\"\\\']* ]]; then
             local e_quoted
             printf -v e_quoted '%q' "$e_val"
             env_lines+=("$e_key=$e_quoted")
-            e="$e_opt $e_key=\${$e_key}"
+            if [[ "$e_val" == *[[:space:]\'\"\\]* ]]; then
+              e="$e_opt $e_key"
+            else
+              e="$e_opt $e_key=\${$e_key}"
+            fi
+          elif [[ "$e_val" =~ [[:space:]] ]]; then
+            e="$e_opt '$e_key=$e_val'"
           fi
-          [[ "$e_val" =~ [[:space:]] ]] && spaced_vars+=("$e_key")
+        else
+          e=$(cfg_quote_arg "$e") || unquotable_args+=("${e%%[ =]*}")
         fi
         extra_block+=$'\n'"$e"
       done
@@ -1819,8 +2070,13 @@ create_new_service() {
     fi
 
     local cmd_block=""
-    if [ -n "$PARSED_COMMAND" ]; then
-      cmd_block="COMMAND=\"$PARSED_COMMAND\""
+    if [ ${#PARSED_COMMAND_TOKENS[@]} -gt 0 ]; then
+      local cmd_line="" c_tok c_q
+      for c_tok in "${PARSED_COMMAND_TOKENS[@]}"; do
+        c_q=$(cfg_quote_token "$c_tok") || unquotable_args+=("COMMAND")
+        cmd_line+="${cmd_line:+ }$c_q"
+      done
+      cmd_block="COMMAND=\"$cmd_line\""
     fi
 
     cat <<EOF > "$target_dir/config.sh"
@@ -1854,9 +2110,9 @@ EOF
       chmod 600 "$target_dir/.env"
       echo -e "🔐 ${CYAN}${#env_lines[@]} variable(s) (secretos y rutas del host) guardadas en${NC} $SERVICE_DIR_NAME/.env ${GRAY}(no en config.sh)${NC}"
     fi
-    if [ ${#spaced_vars[@]} -gt 0 ]; then
-      echo -e "⚠️ ${YELLOW}Variables con espacios en su valor: ${spaced_vars[*]}.${NC}"
-      echo -e "   ${YELLOW}EXTRA_ARGS se divide por espacios al ejecutar 'docker run'; usa --env-file para ellas.${NC}"
+    if [ ${#unquotable_args[@]} -gt 0 ]; then
+      echo -e "⚠️ ${YELLOW}Revisa en config.sh: ${unquotable_args[*]} contiene comillas, '\\', '\$' o '\`' que no pueden${NC}"
+      echo -e "   ${YELLOW}escribirse tal cual dentro de \"...\" (usa comillas simples o pásalo vía .env / --env-file).${NC}"
     fi
     echo ""
     echo -e "✅ ${GREEN}Servicio '$NEW_NAME' generado con éxito en '$SERVICE_DIR_NAME/config.sh'${NC}"
@@ -2235,6 +2491,13 @@ update_service() {
           ( cd "$service_dir" || exit 1; docker compose stop ) || true
           backup_file=$(backup_volumes "$service")
         fi
+        # RestartCount de los contenedores actuales: los que 'up -d' no recree conservan su
+        # historial y solo cuentan como fallo los reinicios nuevos
+        HEALTH_BASELINE=()
+        local cid
+        while read -r cid; do
+          [ -n "$cid" ] && HEALTH_BASELINE[$cid]=$(docker inspect -f '{{.RestartCount}}' "$cid" 2>/dev/null || echo 0)
+        done < <(cd "$service_dir" 2>/dev/null && docker compose ps -a -q 2>/dev/null)
         if ! (
           cd "$service_dir" || exit 1
           if [ "$force" = "true" ]; then
@@ -2247,7 +2510,29 @@ update_service() {
         ); then
           echo -e "${RED}❌ Error al desplegar el stack $service con docker compose${NC}"
           update_error=true
+        else
+          local stack_ids=()
+          mapfile -t stack_ids < <(cd "$service_dir" 2>/dev/null && docker compose ps -a -q 2>/dev/null)
+          if ! wait_containers_healthy "${stack_ids[@]}"; then
+            echo -e "${RED}❌ El stack $service no ha quedado sano tras actualizarse.${NC}"
+            show_failed_container_logs "${HEALTH_FAILED[@]}"
+            update_error=true
+            # Sin rollback automático en compose: se conservan las imágenes anteriores
+            # (no se hace prune al haber error) y se indica cómo volver a ellas a mano
+            if [ "$ids_before" != "$ids_after" ]; then
+              echo -e "⏪ ${YELLOW}Para volver a las imágenes anteriores (se conservan, no se ha hecho prune):${NC}"
+              local img_ref img_id
+              while read -r img_ref img_id; do
+                [ -z "$img_ref" ] && continue
+                [ "$img_id" = "ausente" ] && continue
+                grep -qxF "$img_ref $img_id" <<< "$ids_after" && continue
+                echo "   docker tag $img_id $img_ref"
+              done <<< "$ids_before"
+              echo "   cd \"$service_dir\" && docker compose up -d"
+            fi
+          fi
         fi
+        HEALTH_BASELINE=()
       fi
       ;;
 
@@ -2285,13 +2570,14 @@ update_service() {
   [ "$update_error" = false ]
 }
 
-# IDs locales de las imágenes de un stack compose (para detectar si el pull trajo cambios)
+# "imagen id_local" de cada imagen de un stack compose (para detectar si el pull trajo cambios
+# y, si el stack no queda sano, indicar cómo volver a las imágenes anteriores)
 compose_image_ids() {
   local service_dir="$1"
   local img
   (cd "$service_dir" 2>/dev/null && docker compose config --images 2>/dev/null) | while read -r img; do
     [ -z "$img" ] && continue
-    docker image inspect -f '{{.Id}}' "$img" 2>/dev/null || echo "ausente:$img"
+    printf '%s %s\n' "$img" "$(docker image inspect -f '{{.Id}}' "$img" 2>/dev/null || echo "ausente")"
   done
 }
 

@@ -38,3 +38,9 @@ suite-web/www/descargas/tree-data.js
 .DS_Store
 .idea/
 .vscode/
+
+# =============================================================================
+# 4. Excepción: CI de GitHub Actions
+# =============================================================================
+!.github/workflows/
+!.github/workflows/*.yml

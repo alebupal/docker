@@ -4,7 +4,7 @@ NAME="Vaultwarden"
 MODE="run"
 
 CONTAINER_NAME="vaultwarden"
-IMAGE="vaultwarden/server:latest"
+IMAGE="vaultwarden/server:1.37.5"
 
 PORTS="
 -p 9158:80
