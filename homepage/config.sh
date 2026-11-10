@@ -11,7 +11,7 @@ PORTS="
 "
 
 VOLUMES="
--v ${USER_HOME}/homepage/config:/app/config
+-v ${USER_HOME}/config:/app/config
 -v /var/run/docker.sock:/var/run/docker.sock:ro
 "
 
