@@ -3,5 +3,5 @@
 NAME="Nginx Proxy Manager"
 MODE="compose"
 
-IMAGE="jc21/nginx-proxy-manager:2.16.0"
+IMAGE="jc21/nginx-proxy-manager:latest"
 DO_BACKUP=false

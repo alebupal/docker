@@ -252,16 +252,9 @@ DO_BACKUP=false
 ```
 *(Nota: Para `MODE="compose"`, debe existir el archivo `docker-compose.yml` en la misma carpeta, definiendo su directiva `restart: unless-stopped`).*
 
-### Versiones fijadas (imágenes críticas)
+### Etiquetas de imagen
 
-Vaultwarden, Nginx Proxy Manager e Immich usan una **etiqueta exacta** en vez de `latest`/`release`, para que una actualización masiva (`u`, `-a`) no salte de versión sin revisar las notas de cambios. Con etiqueta fija la comprobación (`c`) sigue funcionando: compara el digest local con el remoto de **esa** etiqueta, así que indicará "Al día" salvo que se republique la misma versión. Para subir de versión:
-
-1. Revisa las notas de la versión nueva (cambios incompatibles, migraciones) y, si hace falta, haz backup (`k`).
-2. Cambia la etiqueta:
-   - **Vaultwarden**: `IMAGE="vaultwarden/server:X.Y.Z"` en `vaultwarden/config.sh` ([releases](https://github.com/dani-garcia/vaultwarden/releases)).
-   - **Nginx Proxy Manager**: `image:` en `nginx-proxy-manager/docker-compose.yml` **y** `IMAGE` en su `config.sh` ([releases](https://github.com/NginxProxyManager/nginx-proxy-manager/releases)).
-   - **Immich**: `IMMICH_VERSION=vX.Y.Z` en `immich-app/.env` (no se versiona; el compose exige que exista). Usa el `docker-compose.yml` de esa versión si cambió ([releases](https://github.com/immich-app/immich/releases)) y no saltes versiones mayores sin leer su guía.
-3. Actualiza el servicio (`./update.sh <servicio>`): descarga la etiqueta nueva, recrea y pasa la comprobación de salud.
+Los servicios usan etiquetas que avanzan solas (`latest`, o `release` en Immich), así que la comprobación (`c`) avisa cuando hay una imagen nueva y la actualización la descarga. Immich puede limitarse a una versión mayor con `IMMICH_VERSION=v3` en su `.env` (no se versiona): así recibe las actualizaciones de la v3 pero no salta a una v4 sin que lo cambies. Antes de actualizar servicios con base de datos (Immich, Vaultwarden) conviene revisar sus notas de versión y hacer backup (`k`).
 
 ---
 
