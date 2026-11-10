@@ -11,7 +11,7 @@ PORTS="
 "
 
 VOLUMES="
--v ${USER_HOME}/tvspy/config:/app/backend/src/database/file
+-v ${USER_HOME}/config:/app/backend/src/database/file
 "
 
 EXTRA_ARGS="

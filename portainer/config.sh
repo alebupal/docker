@@ -13,7 +13,7 @@ PORTS="
 
 VOLUMES="
 -v /var/run/docker.sock:/var/run/docker.sock
--v ${USER_HOME}/portainer/config:/data
+-v ${USER_HOME}/config:/data
 "
 
 EXTRA_ARGS="
@@ -22,4 +22,4 @@ EXTRA_ARGS="
 
 # Backup configurables
 #DO_BACKUP=true                # Activamos backup
-#BACKUP_DIR="${USER_HOME}/docker_backups"  # Directorio donde se guardará el backup
+#BACKUP_DIR="${USER_HOME}/../docker_backups"  # Directorio donde se guardará el backup

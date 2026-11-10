@@ -9,7 +9,7 @@ IMAGE="lscr.io/linuxserver/duckdns:latest"
 PORTS=""
 
 VOLUMES="
--v ${USER_HOME}/duckdns/config:/config
+-v ${USER_HOME}/config:/config
 "
 
 EXTRA_ARGS="

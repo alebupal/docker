@@ -11,7 +11,7 @@ PORTS="
 "
 
 VOLUMES="
--v ${USER_HOME}/kutt/config:/var/lib/kutt
+-v ${USER_HOME}/config:/var/lib/kutt
 "
 
 EXTRA_ARGS="

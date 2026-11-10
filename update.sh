@@ -1523,8 +1523,8 @@ transform_service_volume() {
   # Nunca escribe rutas personales en config.sh (que se versiona):
   #  - rutas absolutas del host (/mnt/..., /home/..., ~/...) -> .env como <SVC>_<CARPETA>_DIR
   #    y en config.sh se referencian como ${VAR};
-  #  - rutas relativas, $PWD o volúmenes con nombre -> ${USER_HOME}/<svc>/config/<sub>
-  #    (literal, sin expandir: se resuelve al cargar el config.sh).
+  #  - rutas relativas, $PWD o volúmenes con nombre -> ${USER_HOME}/config/<sub>, y en el .env
+  #    USER_HOME=<USER_HOME global>/<svc> (el .env se carga antes que config.sh).
   local vol_entry="$1"
   local s_name="$2"
 
@@ -1558,8 +1558,11 @@ transform_service_volume() {
       return
     fi
 
-    # Relativa, $PWD o volumen con nombre: a la carpeta del servicio, con ${USER_HOME} sin expandir
-    printf '%s\t\n' "-v \${USER_HOME}/$s_name/config/$sub:$dst"
+    # Relativa, $PWD o volumen con nombre: a la carpeta del servicio. Convención: el .env del
+    # servicio define USER_HOME=<carpeta del servicio> y config.sh usa rutas cortas ${USER_HOME}/...
+    local uh_quoted
+    printf -v uh_quoted '%q' "$USER_HOME/$s_name"
+    printf '%s\t%s\n' "-v \${USER_HOME}/config/$sub:$dst" "USER_HOME=$uh_quoted"
   else
     printf '%s\t\n' "$vol_entry"
   fi
@@ -1779,7 +1782,9 @@ create_new_service() {
     for v in "${PARSED_VOLUMES[@]}"; do
       IFS=$'\t' read -r vol_line vol_env < <(transform_service_volume "$v" "$SERVICE_DIR_NAME")
       adjusted_volumes+=("$vol_line")
-      [ -n "$vol_env" ] && env_lines+=("$vol_env")
+      if [ -n "$vol_env" ] && [[ " ${env_lines[*]} " != *" $vol_env "* ]]; then
+        env_lines+=("$vol_env")
+      fi
     done
 
     local volumes_block="VOLUMES=\"\""

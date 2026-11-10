@@ -68,7 +68,9 @@ docker/
     - **Restaurador integrado**: Permite listar e intentar restaurar backups desde `$HOME/docker_backups`.
 
 11. **🆕 Asistente y Generador Automático de Servicios**:
-    - Generación automática pegando un comando `docker run` completo (se analiza sin ejecutar nada). Los volúmenes con ruta absoluta del host (`/mnt/...`, `/home/...`, `~/...`) conservan su ubicación real, pero esa ruta se guarda en el `.env` del servicio como `<SERVICIO>_<CARPETA>_DIR` y en `config.sh` queda `${VAR}`; los relativos, `$PWD` o volúmenes con nombre se mapean a `${USER_HOME}/<svc>/config/<nombre del destino>` (sin expandir). Las variables `-e` sensibles (PASS, TOKEN, SECRET, KEY, HASH) también van al `.env`. Así `config.sh` y `docker-compose.yml`, que son lo único que se versiona, no contienen rutas personales ni secretos. Lo mismo aplica al asistente paso a paso, y la plantilla de compose usa `${DATA_DIR}` definido en `.env`.
+    - Generación automática pegando un comando `docker run` completo (se analiza sin ejecutar nada). Los volúmenes con ruta absoluta del host (`/mnt/...`, `/home/...`, `~/...`) conservan su ubicación real, pero esa ruta se guarda en el `.env` del servicio como `<SERVICIO>_<CARPETA>_DIR` y en `config.sh` queda `${VAR}`; los relativos, `$PWD` o volúmenes con nombre se mapean a `${USER_HOME}/config/<nombre del destino>` y el `.env` recibe `USER_HOME=<carpeta del servicio>`. Las variables `-e` sensibles (PASS, TOKEN, SECRET, KEY, HASH) también van al `.env`. Así `config.sh` y `docker-compose.yml`, que son lo único que se versiona, no contienen rutas personales ni secretos. Lo mismo aplica al asistente paso a paso, y la plantilla de compose usa `${DATA_DIR}` definido en `.env`.
+
+> **Convención de rutas:** el `.env` de cada servicio en modo `run` define `USER_HOME` como la carpeta del propio servicio, y su `config.sh` usa rutas cortas (`${USER_HOME}/config`). Como el `.env` se carga antes que `config.sh`, las rutas personales quedan solo en el `.env`.
     - Asistente guiado interactivo paso a paso para crear servicios `docker run` o `docker compose`.
 
 ---

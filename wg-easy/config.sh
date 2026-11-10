@@ -12,7 +12,7 @@ PORTS="
 "
 
 VOLUMES="
--v ${USER_HOME}/wg-easy/wireguard:/etc/wireguard
+-v ${USER_HOME}/wireguard:/etc/wireguard
 "
 
 EXTRA_ARGS="

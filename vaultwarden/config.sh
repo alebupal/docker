@@ -11,9 +11,9 @@ PORTS="
 "
 
 VOLUMES="
--v ${USER_HOME}/vaultwarden/config:/data
+-v ${USER_HOME}/config:/data
 "
 
 EXTRA_ARGS="
---env-file ${USER_HOME}/vaultwarden/.env
+--env-file ${USER_HOME}/.env
 "

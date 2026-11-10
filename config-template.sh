@@ -30,8 +30,12 @@ PORTS="
 "
 
 # Volúmenes mapeados (opcional)
+# Convención: rutas cortas con ${USER_HOME}. En el .env del servicio (no se versiona) define
+#   USER_HOME=/ruta/a/tus/servicios/mi-servicio
+# y cualquier ruta externa como variable (p. ej. DATOS_DIR=/ruta/real). El .env se carga
+# antes que este fichero, así que aquí no queda ninguna ruta personal.
 VOLUMES="
--v $HOME/mi_servicio/data:/usr/share/nginx/html
+-v ${USER_HOME}/data:/usr/share/nginx/html
 "
 
 # Argumentos adicionales para docker run (opcional)

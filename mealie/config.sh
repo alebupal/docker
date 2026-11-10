@@ -11,7 +11,7 @@ PORTS="
 "
 
 VOLUMES="
--v ${USER_HOME}/mealie/config:/app/data/
+-v ${USER_HOME}/config:/app/data/
 "
 
 EXTRA_ARGS="

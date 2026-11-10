@@ -8,5 +8,5 @@ services:
       - '1000:81'
       - '443:443'
     volumes:
-      - ${USER_HOME}/nginx-proxy-manager/data:/data
-      - ${USER_HOME}/nginx-proxy-manager/letsencrypt:/etc/letsencrypt
+      - ${USER_HOME}/data:/data
+      - ${USER_HOME}/letsencrypt:/etc/letsencrypt

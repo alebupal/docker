@@ -12,7 +12,7 @@ PORTS="
 
 VOLUMES="
 -v ${DOWNLOADS_DIR}:/downloads
--v ${USER_HOME}/downtify/config:/data
+-v ${USER_HOME}/config:/data
 "
 
 EXTRA_ARGS="
