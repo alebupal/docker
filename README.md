@@ -266,16 +266,53 @@ Los servicios usan etiquetas que avanzan solas (`latest`, o `release` en Immich)
 - Detrás de Nginx Proxy Manager activa **Websockets Support** en el host y pon tu dominio en `CC_ALLOWED_ORIGINS` **sin barra final** (`https://clip.tudominio.com`).
 
 ### Tinyauth (puerto 3006) con Nginx Proxy Manager
-1. En `tinyauth/.env` define `TINYAUTH_APPURL` (p. ej. `https://auth.tudominio.com`) y `TINYAUTH_AUTH_USERS`. El usuario se genera con
-   `docker run -it --rm ghcr.io/tinyauthapp/tinyauth:v5 user create --interactive`; en el `.env` pon la línea `usuario:hash` **entre comillas simples** y sin `$$` (`TINYAUTH_AUTH_USERS='usuario:$2a$10$...'`), porque `update.sh` también carga el `.env` con bash.
-2. En NPM crea el proxy host de `auth.tudominio.com` → `IP-del-servidor:3006`, **con "Block Common Exploits" desactivado** (bloquea las URLs que tinyauth pasa en la query).
-3. En cada servicio que quieras proteger, pestaña **Advanced** del proxy host:
+
+Tinyauth pone un login delante de las webs que ya publicas con Nginx Proxy Manager (NPM). Las direcciones no cambian: al abrir una web protegida, NPM pregunta a tinyauth si ya has iniciado sesión; si no, te lleva a la página de login de tinyauth y, al entrar, te devuelve a la web. La sesión vale para todos los subdominios del mismo dominio (p. ej. `*.tudominio.duckdns.org`), así que solo inicias sesión una vez.
+
+#### 1. Configurar tinyauth (`tinyauth/.env`, no se versiona)
+
+```
+TINYAUTH_APPURL=https://tinyauth.tudominio.duckdns.org
+TINYAUTH_AUTH_USERS='usuario1:$2a$10$...,usuario2:$2a$10$...'
+```
+
+- `TINYAUTH_APPURL`: URL pública completa de tinyauth, con `https://` y sin barra final.
+- `TINYAUTH_AUTH_USERS`: uno o varios usuarios `usuario:hash` separados por comas, **entre comillas simples y sin `$$`** (`update.sh` también carga el `.env` con bash). Cada usuario se genera con:
+  ```bash
+  docker run -it --rm ghcr.io/tinyauthapp/tinyauth:v5 user create --interactive
+  ```
+  (si pregunta por el formato para Docker, responde que no).
+- Tras cambiar el `.env`, **recrea** el servicio (`update.sh` → tinyauth → 4); un reinicio no relee el `.env`.
+- Tinyauth no tiene panel de usuarios: se gestionan en este `.env`. Admite también usuarios desde LDAP u OAuth/OIDC si en el futuro hace falta un panel (p. ej. LLDAP o Pocket ID).
+
+#### 2. Crear en NPM el proxy host de tinyauth
+
+| Campo | Valor |
+|---|---|
+| Domain Names | `tinyauth.tudominio.duckdns.org` |
+| Scheme / Forward Hostname / Port | `http` / IP del servidor / `3006` |
+| Block Common Exploits | **Desactivado** (bloquea las URLs de redirección del login) |
+| SSL | Certificado Let's Encrypt + Force SSL |
+
+#### 3. Proteger una web que ya tienes en NPM
+
+1. Edita su proxy host. **No cambies la pestaña Details** (dominio, IP y puerto siguen igual).
+2. En la pestaña **Advanced** pega este bloque. Es el mismo para todas las webs: reutiliza el destino de Details mediante las variables de NPM. Solo hay que cambiar `IP-del-servidor` en la línea de `/tinyauth`.
 
 ```nginx
 location / {
-  # La app protegida (ajusta IP:puerto)
-  proxy_pass          http://IP-del-servidor:PUERTO-APP;
-  # Tinyauth auth request
+  # Destino de la pestaña Details (variables de NPM)
+  proxy_pass $forward_scheme://$server:$port;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Real-IP $remote_addr;
+  # WebSockets
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection $http_connection;
+
+  # Comprobación de sesión con tinyauth
   auth_request /tinyauth;
   auth_request_set $redirection_url $upstream_http_x_tinyauth_location;
   error_page 401 403 =302 $redirection_url;
@@ -294,8 +331,18 @@ location /tinyauth {
 }
 ```
 
-   NPM corre en otro stack, por eso se llega a tinyauth por la IP del servidor y el puerto publicado. Si el servicio protegido usa WebSockets, actívalos en el proxy host.
-4. Para que tinyauth vea la IP real del cliente (necesario si usas listas de IPs), define `TINYAUTH_AUTH_TRUSTEDPROXIES` con la red desde la que llega NPM.
+3. Guarda y prueba en una ventana de incógnito: debe llevarte al login de tinyauth y, tras entrar, volver a la web.
+
+**Notas**
+- Al definir `location /` en Advanced, NPM usa ese bloque en lugar del suyo por defecto; por eso el bloque repite el reenvío a la web además de la comprobación de tinyauth.
+- Si la línea con variables diera problemas, usa el destino explícito: `proxy_pass http://IP-del-servidor:PUERTO-DE-LA-WEB;` (es la forma de la guía oficial: https://tinyauth.app/docs/guides/nginx-proxy-manager/).
+- **Deshacer**: borra el bloque de Advanced y guarda; la web vuelve a funcionar como antes.
+- Para que tinyauth vea la IP real del cliente (necesario si usas reglas por IP), define `TINYAUTH_AUTH_TRUSTEDPROXIES` con la red desde la que llega NPM.
+
+#### Qué proteger y qué no
+
+- ✅ Webs que usas solo desde el navegador y sin login propio (o con uno débil): MeTube, IT-Tools, Bento PDF, Stirling PDF, Homepage, ConvertX…
+- ❌ Servicios que usan **apps o clientes** (Vaultwarden, Immich, ClipCascade, JDownloader/MyJD, WireGuard…): sus apps no pueden pasar por el login de tinyauth y dejarían de conectar. Ya tienen su propio login.
 
 ## 📋 Requisitos del Sistema
 
