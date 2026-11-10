@@ -262,8 +262,8 @@ Los servicios usan etiquetas que avanzan solas (`latest`, o `release` en Immich)
 
 ### ClipCascade (puerto 8089)
 - Usuario inicial `admin` / `admin123`: cámbialo en el primer acceso.
-- `CC_SERVER_DB_PASSWORD` (en `.env`) cifra la base de datos: no la cambies después del primer arranque o no podrá abrirla.
-- Detrás de Nginx Proxy Manager activa **Websockets Support** en el host y pon tu dominio en `CC_ALLOWED_ORIGINS`.
+- `CC_SERVER_DB_PASSWORD` (en `.env`) cifra la base de datos H2 y debe tener **dos partes separadas por un espacio** (contraseña del fichero y del usuario), entre comillas simples: `CC_SERVER_DB_PASSWORD='claveFichero claveUsuario'`. Con una sola parte el arranque falla con *Wrong password format*. No la cambies después del primer arranque o no podrá abrir la base de datos.
+- Detrás de Nginx Proxy Manager activa **Websockets Support** en el host y pon tu dominio en `CC_ALLOWED_ORIGINS` **sin barra final** (`https://clip.tudominio.com`).
 
 ### Tinyauth (puerto 3006) con Nginx Proxy Manager
 1. En `tinyauth/.env` define `TINYAUTH_APPURL` (p. ej. `https://auth.tudominio.com`) y `TINYAUTH_AUTH_USERS`. El usuario se genera con

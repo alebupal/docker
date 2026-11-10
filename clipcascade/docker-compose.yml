@@ -15,8 +15,9 @@ services:
       - CC_MAX_MESSAGE_SIZE_IN_MiB=${CC_MAX_MESSAGE_SIZE_IN_MiB:-1}
       - CC_P2P_ENABLED=${CC_P2P_ENABLED:-false}
       - CC_SIGNUP_ENABLED=false
-      # Dominio público (p. ej. https://clip.tudominio.com), definido en .env
+      # Dominio público sin barra final (p. ej. https://clip.tudominio.com), definido en .env
       - CC_ALLOWED_ORIGINS=${CC_ALLOWED_ORIGINS:-*}
-      # Cifra la base de datos H2: no cambiarlo después del primer arranque
+      # Cifra la base de datos H2. Formato obligatorio: 'claveFichero claveUsuario' (dos partes
+      # separadas por un espacio, entre comillas simples en .env). No cambiarlo tras el primer arranque.
       - CC_SERVER_DB_PASSWORD=${CC_SERVER_DB_PASSWORD:?Define CC_SERVER_DB_PASSWORD en .env}
       - CC_SESSION_PERSISTENCE_ENABLED=true
