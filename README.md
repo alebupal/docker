@@ -339,6 +339,15 @@ location /tinyauth {
 - ✅ Webs que usas solo desde el navegador y sin login propio (o con uno débil): MeTube, IT-Tools, Bento PDF, Stirling PDF, Homepage, ConvertX…
 - ❌ Servicios que usan **apps o clientes** (Vaultwarden, Immich, JDownloader/MyJD, WireGuard…): sus apps no pueden pasar por el login de tinyauth y dejarían de conectar. Ya tienen su propio login.
 
+### Toolbox (puerto 8090)
+
+Utilidades del servidor en un único contenedor (`alebupal/toolbox:latest`): explorador doble panel Origen ⇄ Destino para copiar/mover archivos en segundo plano por todo `/host`, subidas FTP/FTPS para Nintendo Switch (con buscador LAN mediante `--network host`), visor integrado de su documentación y acceso equivalente por SSH:
+
+- Actualizar servicio: `./update.sh toolbox`
+- Abrir menú CLI por SSH: `docker exec -it toolbox toolbox`
+- Consultar progreso/logs de la web por SSH: `docker exec -it toolbox toolbox web estado` y `docker exec -it toolbox toolbox web logs`
+- Ver ayuda detallada de todos los comandos SSH: `docker exec -it toolbox toolbox readme` o `../toolbox/README.md`.
+
 ## 📋 Requisitos del Sistema
 
 El script verifica automáticamente la presencia de las herramientas necesarias al arrancar:
