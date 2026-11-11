@@ -260,11 +260,6 @@ Los servicios usan etiquetas que avanzan solas (`latest`, o `release` en Immich)
 
 ## 🔐 Notas de servicios concretos
 
-### ClipCascade (puerto 8089)
-- Usuario inicial `admin` / `admin123`: cámbialo en el primer acceso.
-- `CC_SERVER_DB_PASSWORD` (en `.env`) cifra la base de datos H2 y debe tener **dos partes separadas por un espacio** (contraseña del fichero y del usuario), entre comillas simples: `CC_SERVER_DB_PASSWORD='claveFichero claveUsuario'`. Con una sola parte el arranque falla con *Wrong password format*. No la cambies después del primer arranque o no podrá abrir la base de datos.
-- Detrás de Nginx Proxy Manager activa **Websockets Support** en el host y pon tu dominio en `CC_ALLOWED_ORIGINS` **sin barra final** (`https://clip.tudominio.com`).
-
 ### Tinyauth (puerto 3006) con Nginx Proxy Manager
 
 Tinyauth pone un login delante de las webs que ya publicas con Nginx Proxy Manager (NPM). Las direcciones no cambian: al abrir una web protegida, NPM pregunta a tinyauth si ya has iniciado sesión; si no, te lleva a la página de login de tinyauth y, al entrar, te devuelve a la web. La sesión vale para todos los subdominios del mismo dominio (p. ej. `*.tudominio.duckdns.org`), así que solo inicias sesión una vez.
@@ -342,7 +337,7 @@ location /tinyauth {
 #### Qué proteger y qué no
 
 - ✅ Webs que usas solo desde el navegador y sin login propio (o con uno débil): MeTube, IT-Tools, Bento PDF, Stirling PDF, Homepage, ConvertX…
-- ❌ Servicios que usan **apps o clientes** (Vaultwarden, Immich, ClipCascade, JDownloader/MyJD, WireGuard…): sus apps no pueden pasar por el login de tinyauth y dejarían de conectar. Ya tienen su propio login.
+- ❌ Servicios que usan **apps o clientes** (Vaultwarden, Immich, JDownloader/MyJD, WireGuard…): sus apps no pueden pasar por el login de tinyauth y dejarían de conectar. Ya tienen su propio login.
 
 ## 📋 Requisitos del Sistema
 
