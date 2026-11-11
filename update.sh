@@ -223,12 +223,23 @@ get_service_port() {
   local port=""
   local cfg_file="$BASE_DIR/$service/config.sh"
   local dc_file="$BASE_DIR/$service/docker-compose.yml"
+  local env_file="$BASE_DIR/$service/.env"
 
   if [ -f "$cfg_file" ]; then
     port=$(grep -E '^[[:space:]]*-p[[:space:]]+[0-9]+' "$cfg_file" 2>/dev/null | head -n 1 | awk '{print $2}' | cut -d: -f1)
   fi
   if [ -z "$port" ] && [ -f "$dc_file" ]; then
     port=$(grep -E '^[[:space:]]*-[[:space:]]*["0-9]+:[0-9]+' "$dc_file" 2>/dev/null | head -n 1 | sed -E 's/[^0-9]*([0-9]+):.*/\1/')
+  fi
+  # Contenedores en modo host (--network host / network_mode: host) sin mapeo -p/ports:
+  if [ -z "$port" ] && [ -f "$cfg_file" ] && grep -qE -- '--network[[:space:]=]+host' "$cfg_file" 2>/dev/null; then
+    port=$(grep -E "^[[:space:]]*(-e[[:space:]]+['\"]?PORT=|WEB_PORT=)[0-9]+" "$cfg_file" 2>/dev/null | head -n 1 | sed -E 's/.*=([0-9]+).*/\1/')
+  fi
+  if [ -z "$port" ] && [ -f "$dc_file" ] && grep -qE 'network_mode:[[:space:]]*host' "$dc_file" 2>/dev/null; then
+    port=$(grep -E '^[[:space:]]*-[[:space:]]*PORT=[0-9]+' "$dc_file" 2>/dev/null | head -n 1 | sed -E 's/.*=([0-9]+).*/\1/')
+  fi
+  if [ -z "$port" ] && [ -f "$env_file" ]; then
+    port=$(grep -E '^[[:space:]]*WEB_PORT=[0-9]+' "$env_file" 2>/dev/null | head -n 1 | sed -E 's/.*=([0-9]+).*/\1/')
   fi
   if [ -n "$port" ]; then
     echo ":$port"
