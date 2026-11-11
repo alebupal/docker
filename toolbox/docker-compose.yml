@@ -1,8 +1,8 @@
 services:
-  gestor-archivos:
-    build: ${BUILD_CONTEXT:-../../gestor-archivos}
+  toolbox:
+    build: ${BUILD_CONTEXT:-../../toolbox}
     pull_policy: build
-    container_name: gestor-archivos
+    container_name: toolbox
     restart: unless-stopped
     network_mode: host
     environment:

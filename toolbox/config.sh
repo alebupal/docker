@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NAME="Gestor de Archivos (Mover + FTP)"
+NAME="Toolbox"
 MODE="compose"
 DO_BACKUP=false
 
