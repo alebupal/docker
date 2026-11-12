@@ -68,4 +68,7 @@ EXTRA_ARGS="
 # COPIAS DE SEGURIDAD (BACKUP)
 # =============================================================================
 DO_BACKUP=false                      # true / false (realizar backup de volúmenes antes de actualizar)
+# Si el backup previo falla, la actualización se cancela y el servicio sigue con su versión anterior.
+# Retención global (variables de entorno de update.sh): BACKUP_RETENTION_DAYS=7 (0 = no borrar) y
+# BACKUP_KEEP_MIN=3 (copias más recientes de cada servicio que se conservan siempre).
 # BACKUP_DIR="/ruta/backups/mi-servicio" # Opcional: sustituye solo para este servicio al global ($USER_HOME/docker_backups)

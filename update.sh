@@ -83,9 +83,47 @@ check_prerequisites() {
 # ─────────────────────────────
 # Limpieza Automática de Backups Antiguos (>7 días)
 # ─────────────────────────────
+# BACKUP_RETENTION_DAYS: días que se conservan los backups (0 = no borrar nunca automáticamente).
+# BACKUP_KEEP_MIN: copias más recientes de cada servicio que se conservan siempre, aunque sean antiguas.
+BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
+BACKUP_KEEP_MIN="${BACKUP_KEEP_MIN:-3}"
+
+# Borra los .tar.gz de BACKUP_DIR con más de $1 días, conservando siempre los $2 más recientes de
+# cada servicio (deducido del nombre <servicio>_backup_AAAAMMDD_HHMMSS.tar.gz; los que no siguen ese
+# formato se agrupan juntos). Imprime el número de ficheros eliminados.
+prune_backups() {
+  local days="$1" keep="$2" deleted=0
+  [[ "$days" =~ ^[0-9]+$ ]] || days=7
+  [[ "$keep" =~ ^[0-9]+$ ]] || keep=3
+  if [ "$days" -eq 0 ] || [ ! -d "$BACKUP_DIR" ]; then
+    echo 0
+    return 0
+  fi
+  local cutoff mtime path name group
+  cutoff=$(( $(date +%s) - days * 86400 ))
+  local -A seen=()
+  while IFS=' ' read -r mtime path; do
+    [ -z "$path" ] && continue
+    name="${path##*/}"
+    if [[ "$name" =~ ^(.+)_backup_[0-9]{8}_[0-9]{6}\.tar\.gz$ ]]; then
+      group="${BASH_REMATCH[1]}"
+    else
+      group="__otros__"
+    fi
+    seen[$group]=$(( ${seen[$group]:-0} + 1 ))
+    [ "${seen[$group]}" -le "$keep" ] && continue
+    if [ "${mtime%.*}" -lt "$cutoff" ] && rm -f -- "$path"; then
+      deleted=$((deleted + 1))
+    fi
+  done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.tar.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn)
+  echo "$deleted"
+}
+
 clean_old_backups() {
-  if [ -d "$BACKUP_DIR" ]; then
-    find "$BACKUP_DIR" -maxdepth 1 -name "*.tar.gz" -type f -mtime +7 -delete 2>/dev/null || true
+  local n
+  n=$(prune_backups "$BACKUP_RETENTION_DAYS" "$BACKUP_KEEP_MIN")
+  if [ "${n:-0}" -gt 0 ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - RETENCION - $n backup(s) con más de $BACKUP_RETENTION_DAYS días eliminados (se conservan los $BACKUP_KEEP_MIN más recientes de cada servicio)" >> "$LOG_FILE" 2>/dev/null || true
   fi
 }
 
@@ -113,6 +151,94 @@ PROTECTED_VARS=(BASE_DIR USER_HOME BACKUP_DIR LOG_FILE)
 LOADED_ENV_KEYS=()
 
 # ─────────────────────────────
+# Lectura del .env (sin ejecutarlo)
+# ─────────────────────────────
+# Expande ${VAR}, ${VAR:-def}, ${VAR-def} y $VAR como docker compose al leer un .env ($$ = '$').
+# Resultado en ENV_REPLY (sin subshells: se llama para cada servicio al pintar el menú).
+env_expand() {
+  # Variables locales con prefijo _ee_ para que ${!nombre} no lea una local con el mismo nombre
+  local _ee_s="$1" _ee_out="" _ee_name _ee_op _ee_def
+  local _ee_re_def='^\{([A-Za-z_][A-Za-z0-9_]*)(:?-)([^}]*)\}'
+  local _ee_re_br='^\{([A-Za-z_][A-Za-z0-9_]*)\}'
+  local _ee_re_plain='^([A-Za-z_][A-Za-z0-9_]*)'
+  while [[ "$_ee_s" == *'$'* ]]; do
+    _ee_out+="${_ee_s%%\$*}"
+    _ee_s="${_ee_s#*\$}"
+    if [[ "$_ee_s" == '$'* ]]; then
+      _ee_out+='$'
+      _ee_s="${_ee_s:1}"
+    elif [[ "$_ee_s" =~ $_ee_re_def ]]; then
+      _ee_name="${BASH_REMATCH[1]}"; _ee_op="${BASH_REMATCH[2]}"; _ee_def="${BASH_REMATCH[3]}"
+      if [[ -v "$_ee_name" ]] && { [ "$_ee_op" = "-" ] || [ -n "${!_ee_name}" ]; }; then
+        _ee_out+="${!_ee_name}"
+      else
+        _ee_out+="$_ee_def"
+      fi
+      _ee_s="${_ee_s:${#BASH_REMATCH[0]}}"
+    elif [[ "$_ee_s" =~ $_ee_re_br ]] || [[ "$_ee_s" =~ $_ee_re_plain ]]; then
+      _ee_name="${BASH_REMATCH[1]}"
+      _ee_out+="${!_ee_name-}"
+      _ee_s="${_ee_s:${#BASH_REMATCH[0]}}"
+    else
+      _ee_out+='$'
+    fi
+  done
+  ENV_REPLY="$_ee_out$_ee_s"
+}
+
+# Quita los escapes de un valor entre comillas dobles (\n, \", \\). Resultado en ENV_REPLY.
+env_dq_unescape() {
+  local _eu_s="$1" _eu_out=""
+  while [[ "$_eu_s" == *'\'* ]]; do
+    _eu_out+="${_eu_s%%\\*}"
+    _eu_s="${_eu_s#*\\}"
+    case "${_eu_s:0:1}" in
+      n) _eu_out+=$'\n' ;;
+      '"') _eu_out+='"' ;;
+      '\' | '') _eu_out+='\' ;;
+      *) _eu_out+="\\${_eu_s:0:1}" ;;
+    esac
+    _eu_s="${_eu_s:1}"
+  done
+  ENV_REPLY="$_eu_out$_eu_s"
+}
+
+# Carga un .env como lo interpreta docker compose, sin ejecutarlo con bash:
+#   CLAVE=valor            → sin comillas: se recorta, admite '# comentario' tras un espacio y ${VAR}
+#   CLAVE='valor'          → literal (p. ej. hashes bcrypt con '$': no se expanden)
+#   CLAVE="valor"          → admite \n, \" y \\ y expande ${VAR}
+# Las claves se exportan (docker run -e CLAVE las toma del entorno) y se anotan en LOADED_ENV_KEYS.
+load_env_file() {
+  # Variables locales con prefijo _le_ para que printf -v no asigne a una local con el nombre de la clave
+  local _le_file="$1" _le_line _le_key _le_raw
+  local _le_re_line='^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=(.*)$'
+  local _le_re_sq="^'([^']*)'[[:space:]]*(#.*)?$"
+  local _le_re_dq='^"(([^"\\]|\\.)*)"[[:space:]]*(#.*)?$'
+  local _le_re_cm='^(.*[^[:space:]])[[:space:]]+#.*$'
+  while IFS= read -r _le_line || [ -n "$_le_line" ]; do
+    _le_line="${_le_line%$'\r'}"
+    [[ "$_le_line" =~ $_le_re_line ]] || continue
+    _le_key="${BASH_REMATCH[2]}"
+    _le_raw="${BASH_REMATCH[3]}"
+    _le_raw="${_le_raw#"${_le_raw%%[![:space:]]*}"}"
+    if [[ "$_le_raw" =~ $_le_re_sq ]]; then
+      ENV_REPLY="${BASH_REMATCH[1]}"
+    elif [[ "$_le_raw" =~ $_le_re_dq ]]; then
+      env_dq_unescape "${BASH_REMATCH[1]}"
+      env_expand "$ENV_REPLY"
+    else
+      [[ "$_le_raw" =~ $_le_re_cm ]] && _le_raw="${BASH_REMATCH[1]}"
+      _le_raw="${_le_raw%"${_le_raw##*[![:space:]]}"}"
+      env_expand "$_le_raw"
+    fi
+    printf -v "$_le_key" '%s' "$ENV_REPLY"
+    # shellcheck disable=SC2163
+    export "$_le_key"
+    LOADED_ENV_KEYS+=("$_le_key")
+  done < "$_le_file"
+}
+
+# ─────────────────────────────
 # Cargar Servicio
 # ─────────────────────────────
 load_service_config() {
@@ -137,11 +263,7 @@ load_service_config() {
 
   local env_file="$BASE_DIR/$service/.env"
   if [ -f "$env_file" ]; then
-    mapfile -t LOADED_ENV_KEYS < <(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "$env_file")
-    set -a
-    # shellcheck disable=SC1090
-    source "$env_file"
-    set +a
+    load_env_file "$env_file"
   fi
 
   local config_file="$BASE_DIR/$service/config.sh"
@@ -157,7 +279,16 @@ load_service_config() {
     rc=0
   fi
 
-  # 3. Restaurar globales y quitarles el export (para no pisar el .env en docker compose)
+  # 3. En compose, docker compose lee su propio .env: no se exportan esas claves para que el
+  #    entorno del script no tenga prioridad sobre el fichero (el config.sh ya las ha podido usar)
+  if [ "$MODE" = "compose" ]; then
+    for k in "${LOADED_ENV_KEYS[@]}"; do
+      # shellcheck disable=SC2163
+      export -n "$k"
+    done
+  fi
+
+  # 4. Restaurar globales y quitarles el export (para no pisar el .env en docker compose)
   for k in "${PROTECTED_VARS[@]}"; do
     printf -v "$k" '%s' "${saved_globals[$k]}"
     # shellcheck disable=SC2163
@@ -1108,7 +1239,7 @@ manage_maintenance() {
   echo -e "===============================${NC}"
   echo -e " 1) 📄 Vaciar archivo de registro de actualizaciones (Log)"
   echo -e " 2) 🗑 Eliminar TODAS las copias de seguridad (.tar.gz)"
-  echo -e " 3) ⏱ Eliminar copias de seguridad de más de 3 días"
+  echo -e " 3) ⏱ Eliminar copias de seguridad de más de 3 días (conserva las $BACKUP_KEEP_MIN más recientes de cada servicio)"
   echo -e " 4) 🐳 Limpieza de imágenes huérfanas de Docker (image prune)"
   echo -e " 5) 🧼 Limpieza profunda de Docker (imágenes, build cache y volúmenes no usados)"
   echo -e " 6) ✨ Limpieza completa recomendada (Vaciar log + Backups > 3 días + Prune)"
@@ -1137,8 +1268,8 @@ manage_maintenance() {
       ;;
     3)
       local count
-      count=$(find "$BACKUP_DIR" -maxdepth 1 -name "*.tar.gz" -type f -mtime +3 -delete -print 2>/dev/null | wc -l)
-      echo -e "✅ ${GREEN}Se han eliminado $count copias de seguridad de más de 3 días.${NC}"
+      count=$(prune_backups 3 "$BACKUP_KEEP_MIN")
+      echo -e "✅ ${GREEN}Se han eliminado $count copias de seguridad de más de 3 días (conservando las $BACKUP_KEEP_MIN más recientes de cada servicio).${NC}"
       ;;
     4)
       echo "🧹 Limpiando imágenes obsoletas..."
@@ -1157,7 +1288,7 @@ manage_maintenance() {
       ;;
     6)
       [ -f "$LOG_FILE" ] && : > "$LOG_FILE"
-      find "$BACKUP_DIR" -maxdepth 1 -name "*.tar.gz" -type f -mtime +3 -delete 2>/dev/null || true
+      prune_backups 3 "$BACKUP_KEEP_MIN" >/dev/null
       docker image prune -f
       echo -e "✅ ${GREEN}Limpieza completa realizada (Log vaciado, backups antiguos eliminados e imágenes limpiadas).${NC}"
       ;;
@@ -1244,9 +1375,26 @@ perform_service_backup() {
   fi
 
   if [ ${#tar_args[@]} -gt 0 ]; then
-    if tar -czf "$backup_file" -C / "${tar_args[@]}" 2>/dev/null; then
+    # stderr de tar a un temporal: código 1 = aviso (un fichero cambió durante la copia, el backup
+    # es válido), código >= 2 = error (permisos, disco lleno...): el backup no sirve
+    local tar_err_file tar_rc tar_err
+    tar_err_file=$(mktemp)
+    tar -czf "$backup_file" -C / "${tar_args[@]}" 2>"$tar_err_file"
+    tar_rc=$?
+    tar_err=$(head -n 20 "$tar_err_file")
+    rm -f "$tar_err_file"
+    if [ "$tar_rc" -eq 0 ]; then
       success=true
+    elif [ "$tar_rc" -eq 1 ]; then
+      success=true
+      echo -e "  ⚠️ ${YELLOW}tar terminó con avisos (algún fichero cambió durante la copia); el backup se conserva:${NC}" >&2
+      [ -n "$tar_err" ] && sed 's/^/     /' <<< "$tar_err" >&2
+    else
+      echo -e "  ❌ ${RED}tar falló (código $tar_rc) al crear el backup de $service:${NC}" >&2
+      [ -n "$tar_err" ] && sed 's/^/     /' <<< "$tar_err" >&2
     fi
+  else
+    echo -e "  ❌ ${RED}No hay nada que respaldar para $service (no existe $service_dir).${NC}" >&2
   fi
 
   if [ "$success" = true ] && [ -f "$backup_file" ] && [ -s "$backup_file" ]; then
@@ -1259,9 +1407,7 @@ perform_service_backup() {
     echo "$backup_file"
     return 0
   else
-    if [ "$mode_flag" != "silent" ]; then
-      echo -e "  ❌ ${RED}Error al crear la copia de seguridad para $service${NC}"
-    fi
+    echo -e "  ❌ ${RED}Error al crear la copia de seguridad para $service${NC}" >&2
     rm -f "$backup_file" 2>/dev/null || true
     return 1
   fi
@@ -2289,13 +2435,15 @@ EOF
 # ─────────────────────────────
 # Backup de Volúmenes
 # ─────────────────────────────
+# Imprime la ruta del backup; devuelve 1 si DO_BACKUP=true y el backup ha fallado
 backup_volumes() {
   local service="$1"
-  local backup_file=""
+  local backup_file="" rc=0
   if [ "$DO_BACKUP" = true ]; then
-    backup_file=$(perform_service_backup "$service" "silent")
+    backup_file=$(perform_service_backup "$service" "silent") || rc=$?
   fi
   echo "$backup_file"
+  return $rc
 }
 
 # ─────────────────────────────
@@ -2444,6 +2592,7 @@ update_service() {
 
   local backup_file=""
   local update_error=false
+  local error_reason=""
 
   case "$MODE" in
     run)
@@ -2459,28 +2608,59 @@ update_service() {
         pull_output=$(cat "$pull_tmp")
         rm -f "$pull_tmp"
 
+        # ¿El contenedor ya usa la imagen local recién descargada? Se compara el ID de imagen del
+        # contenedor con el de la imagen (no basta con "Image is up to date": tras un rollback o un
+        # pull hecho por otra vía, la imagen local es la última pero el contenedor sigue en otra)
+        local image_id="" container_image_id="" up_to_date=false
+        if [ "$pull_rc" -eq 0 ]; then
+          image_id=$(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null)
+          if [ -n "$CONTAINER_NAME" ]; then
+            container_image_id=$(docker container inspect -f '{{.Image}}' "$CONTAINER_NAME" 2>/dev/null)
+            [ -n "$image_id" ] && [ "$container_image_id" = "$image_id" ] && up_to_date=true
+          elif [[ "$pull_output" == *"Image is up to date"* ]]; then
+            up_to_date=true
+          fi
+        fi
+
         if [ "$pull_rc" -ne 0 ]; then
           echo -e "${RED}❌ Error al descargar la imagen $IMAGE${NC}"
           update_error=true
-        elif [[ "$pull_output" == *"Image is up to date"* ]] && [ "$force" != "true" ]; then
+        elif [ "$up_to_date" = true ] && [ "$force" != "true" ]; then
           echo -e "✅ ${GREEN}$NAME ya está en su última versión, se omite reinicio.${NC}"
         else
-          if [[ "$pull_output" == *"Image is up to date"* ]]; then
+          if [ "$up_to_date" = true ]; then
             echo -e "🔄 ${YELLOW}Recreando contenedor $NAME con la configuración actual...${NC}"
+          elif [ -n "$CONTAINER_NAME" ] && [ -z "$container_image_id" ]; then
+            echo -e "🚀 ${GREEN}El contenedor $CONTAINER_NAME no existe: creándolo con la imagen actual...${NC}"
+          elif [[ "$pull_output" == *"Image is up to date"* ]]; then
+            echo -e "🔄 ${YELLOW}El contenedor $CONTAINER_NAME usa una imagen distinta de la última descargada: recreando $NAME...${NC}"
           else
             echo -e "🚀 ${GREEN}Nueva versión descargada con éxito. Actualizando $NAME...${NC}"
           fi
 
           # Backup en frío: se para el contenedor antes del tar (se iba a recrear igualmente)
+          local backup_failed=false was_running=false
           if [ "$DO_BACKUP" = true ]; then
             if [ -n "$CONTAINER_NAME" ]; then
+              [ "$(docker container inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null)" = "true" ] && was_running=true
               echo "🛑 Parando contenedor $CONTAINER_NAME para el backup..."
               docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
             fi
-            backup_file=$(backup_volumes "$service")
+            backup_file=$(backup_volumes "$service") || backup_failed=true
           fi
 
-          recreate_run_container || update_error=true
+          if [ "$backup_failed" = true ]; then
+            # Sin backup no se recrea: se vuelve a dejar el contenedor como estaba
+            echo -e "${RED}❌ Ha fallado el backup previo de $NAME: se cancela la actualización para no recrearlo sin copia de seguridad.${NC}"
+            if [ "$was_running" = true ]; then
+              echo "▶ Volviendo a arrancar $CONTAINER_NAME con la versión anterior..."
+              docker start "$CONTAINER_NAME" >/dev/null 2>&1 || echo -e "${RED}❌ No se pudo volver a arrancar $CONTAINER_NAME${NC}"
+            fi
+            update_error=true
+            error_reason="backup previo fallido, no se ha actualizado"
+          else
+            recreate_run_container || update_error=true
+          fi
         fi
       fi
       ;;
@@ -2497,53 +2677,63 @@ update_service() {
       else
         ids_after=$(compose_image_ids "$service_dir")
         # Backup en frío solo si va a haber cambios (imágenes nuevas o recreación forzada)
+        local backup_failed=false
         if [ "$DO_BACKUP" = true ] && { [ "$force" = "true" ] || [ "$ids_before" != "$ids_after" ]; }; then
           echo "🛑 Deteniendo stack para el backup..."
           ( cd "$service_dir" || exit 1; docker compose stop ) || true
-          backup_file=$(backup_volumes "$service")
+          backup_file=$(backup_volumes "$service") || backup_failed=true
         fi
-        # RestartCount de los contenedores actuales: los que 'up -d' no recree conservan su
-        # historial y solo cuentan como fallo los reinicios nuevos
-        HEALTH_BASELINE=()
-        local cid
-        while read -r cid; do
-          [ -n "$cid" ] && HEALTH_BASELINE[$cid]=$(docker inspect -f '{{.RestartCount}}' "$cid" 2>/dev/null || echo 0)
-        done < <(cd "$service_dir" 2>/dev/null && docker compose ps -a -q 2>/dev/null)
-        if ! (
-          cd "$service_dir" || exit 1
-          if [ "$force" = "true" ]; then
-            echo "🚀 Recreando y actualizando stack con docker compose..."
-            docker compose up -d --force-recreate --remove-orphans
-          else
-            echo "🚀 Actualizando stack con docker compose (sin tiempo de corte)..."
-            docker compose up -d --remove-orphans
-          fi
-        ); then
-          echo -e "${RED}❌ Error al desplegar el stack $service con docker compose${NC}"
+        if [ "$backup_failed" = true ]; then
+          # Sin backup no se despliega: se vuelven a arrancar los contenedores actuales (imágenes anteriores)
+          echo -e "${RED}❌ Ha fallado el backup previo de $NAME: se cancela la actualización para no desplegar sin copia de seguridad.${NC}"
+          echo "▶ Volviendo a arrancar el stack con sus contenedores actuales..."
+          ( cd "$service_dir" || exit 1; docker compose start ) || echo -e "${RED}❌ No se pudo volver a arrancar el stack $service${NC}"
           update_error=true
+          error_reason="backup previo fallido, no se ha actualizado"
         else
-          local stack_ids=()
-          mapfile -t stack_ids < <(cd "$service_dir" 2>/dev/null && docker compose ps -a -q 2>/dev/null)
-          if ! wait_containers_healthy "${stack_ids[@]}"; then
-            echo -e "${RED}❌ El stack $service no ha quedado sano tras actualizarse.${NC}"
-            show_failed_container_logs "${HEALTH_FAILED[@]}"
+          # RestartCount de los contenedores actuales: los que 'up -d' no recree conservan su
+          # historial y solo cuentan como fallo los reinicios nuevos
+          HEALTH_BASELINE=()
+          local cid
+          while read -r cid; do
+            [ -n "$cid" ] && HEALTH_BASELINE[$cid]=$(docker inspect -f '{{.RestartCount}}' "$cid" 2>/dev/null || echo 0)
+          done < <(cd "$service_dir" 2>/dev/null && docker compose ps -a -q 2>/dev/null)
+          if ! (
+            cd "$service_dir" || exit 1
+            if [ "$force" = "true" ]; then
+              echo "🚀 Recreando y actualizando stack con docker compose..."
+              docker compose up -d --force-recreate --remove-orphans
+            else
+              echo "🚀 Actualizando stack con docker compose (sin tiempo de corte)..."
+              docker compose up -d --remove-orphans
+            fi
+          ); then
+            echo -e "${RED}❌ Error al desplegar el stack $service con docker compose${NC}"
             update_error=true
-            # Sin rollback automático en compose: se conservan las imágenes anteriores
-            # (no se hace prune al haber error) y se indica cómo volver a ellas a mano
-            if [ "$ids_before" != "$ids_after" ]; then
-              echo -e "⏪ ${YELLOW}Para volver a las imágenes anteriores (se conservan, no se ha hecho prune):${NC}"
-              local img_ref img_id
-              while read -r img_ref img_id; do
-                [ -z "$img_ref" ] && continue
-                [ "$img_id" = "ausente" ] && continue
-                grep -qxF "$img_ref $img_id" <<< "$ids_after" && continue
-                echo "   docker tag $img_id $img_ref"
-              done <<< "$ids_before"
-              echo "   cd \"$service_dir\" && docker compose up -d"
+          else
+            local stack_ids=()
+            mapfile -t stack_ids < <(cd "$service_dir" 2>/dev/null && docker compose ps -a -q 2>/dev/null)
+            if ! wait_containers_healthy "${stack_ids[@]}"; then
+              echo -e "${RED}❌ El stack $service no ha quedado sano tras actualizarse.${NC}"
+              show_failed_container_logs "${HEALTH_FAILED[@]}"
+              update_error=true
+              # Sin rollback automático en compose: se conservan las imágenes anteriores
+              # (no se hace prune al haber error) y se indica cómo volver a ellas a mano
+              if [ "$ids_before" != "$ids_after" ]; then
+                echo -e "⏪ ${YELLOW}Para volver a las imágenes anteriores (se conservan, no se ha hecho prune):${NC}"
+                local img_ref img_id
+                while read -r img_ref img_id; do
+                  [ -z "$img_ref" ] && continue
+                  [ "$img_id" = "ausente" ] && continue
+                  grep -qxF "$img_ref $img_id" <<< "$ids_after" && continue
+                  echo "   docker tag $img_id $img_ref"
+                done <<< "$ids_before"
+                echo "   cd \"$service_dir\" && docker compose up -d"
+              fi
             fi
           fi
+          HEALTH_BASELINE=()
         fi
-        HEALTH_BASELINE=()
       fi
       ;;
 
@@ -2571,8 +2761,8 @@ update_service() {
   fi
 
   if [ "$update_error" = true ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR - $NAME ($service)" >> "$LOG_FILE"
-    SESSION_RESULTS+=("$NAME ($service): ERROR")
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR - $NAME ($service)${error_reason:+ - $error_reason}" >> "$LOG_FILE"
+    SESSION_RESULTS+=("$NAME ($service): ERROR${error_reason:+ ($error_reason)}")
   else
     echo "$(date '+%Y-%m-%d %H:%M:%S') - OK - $NAME ($service)" >> "$LOG_FILE"
     SESSION_RESULTS+=("$NAME ($service): OK")
@@ -2702,7 +2892,12 @@ show_help() {
 # Inicio de Ejecución
 # ─────────────────────────────
 check_prerequisites
-clean_old_backups
+# La retención de backups solo se aplica en las operaciones que modifican algo (no en ayuda,
+# logs, monitor, restauración, comprobación de versiones ni al mostrar comandos)
+case "$1" in
+  --help|-\?|help|--logs|-l|--stats|-m|--restore|-r|--show|-s|--check|-c) ;;
+  *) clean_old_backups ;;
+esac
 
 # Soporte para ayuda y crear nuevo servicio vía argumento CLI
 if [ "$1" = "--help" ] || [ "$1" = "-?" ] || [ "$1" = "help" ]; then

@@ -41,7 +41,7 @@ docker/
 | DuckDNS | `duckdns` | run | `lscr.io/linuxserver/duckdns:latest` | — |
 | FileBrowser Quantum | `filebrowser` | compose | `ghcr.io/gtsteffaniak/filebrowser:stable` | 8082 |
 | Homepage | `homepage` | run | `ghcr.io/gethomepage/homepage:latest` | 3002 |
-| Immich | `immich-app` | compose | `ghcr.io/immich-app/immich-server:release` (+ ML, Postgres, Valkey) | 2283 |
+| Immich | `immich-app` | compose | `ghcr.io/immich-app/immich-server:v3` (+ ML, Postgres, Valkey) | 2283 |
 | IT Tools | `it_tools` | run | `corentinth/it-tools:latest` | 8087 |
 | JDownloader 2 | `jdownloader-2` | run | `jlesage/jdownloader-2:latest` | 5800 |
 | Kutt | `kutt` | run | `kutt/kutt:latest` | 3003 |
@@ -108,16 +108,19 @@ docker/
 10. **💾 Copias de Seguridad Automatizadas y Restauración (Rollback)**:
     - Compatible tanto con contenedores individuales (`MODE="run"`) como con stacks (`MODE="compose"`).
     - Si `DO_BACKUP=true`, realiza un backup comprimido `.tar.gz` antes de actualizar, con el contenedor/stack ya detenido (solo cuando realmente se va a recrear). Si la actualización falla, el backup se conserva.
+    - **Si el backup previo falla, no se actualiza**: se muestra el error de `tar` (permisos, disco lleno...), se vuelve a arrancar el contenedor o stack con su versión anterior y la actualización queda como ERROR en el log (`backup previo fallido`). Un aviso de `tar` porque un fichero cambió durante la copia (código 1) no se considera fallo.
     - Las rutas se guardan relativas a `/` (`tar -C /`) y se restauran en su ubicación original; los backups del formato antiguo se siguen detectando y restaurando.
     - Los volúmenes con nombre y los bind mounts externos (en compose) no se incluyen: el script avisa de ellos. En el backup manual (`k`) se ofrece detener temporalmente los servicios.
     - **Restaurador integrado**: Permite listar e intentar restaurar backups desde `$USER_HOME/docker_backups` (configurable con la variable `BACKUP_DIR`).
-    - **Retención automática**: al arrancar el script se eliminan los `.tar.gz` con más de 7 días de esa carpeta. El log de operaciones se guarda en `update-containers.log` dentro de ella.
+    - **Retención automática**: en las operaciones que modifican algo (actualizar, ciclo de vida, backup, menú interactivo…) se eliminan los `.tar.gz` de esa carpeta con más de `BACKUP_RETENTION_DAYS` días (7 por defecto; `0` desactiva el borrado), **conservando siempre los `BACKUP_KEEP_MIN` más recientes de cada servicio** (3 por defecto), aunque sean antiguos. No se borra nada al consultar (`--help`, `-l`, `-m`, `-r`, `-s`, `-c`). Ejemplo: `BACKUP_RETENTION_DAYS=30 BACKUP_KEEP_MIN=5 ./update.sh -a`. Lo eliminado se anota en el log de operaciones, `update-containers.log`, dentro de esa misma carpeta.
 
 11. **🆕 Asistente y Generador Automático de Servicios**:
-    - Generación automática pegando un comando `docker run` completo (se analiza sin ejecutar nada). Los volúmenes con ruta absoluta del host (`/mnt/...`, `/home/...`, `~/...`) conservan su ubicación real, pero esa ruta se guarda en el `.env` del servicio como `<SERVICIO>_<CARPETA>_DIR` y en `config.sh` queda `${VAR}`; los relativos, `$PWD` o volúmenes con nombre se mapean a `${USER_HOME}/config/<nombre del destino>` y el `.env` recibe `USER_HOME=<carpeta del servicio>`. Las variables `-e` sensibles (PASS, TOKEN, SECRET, KEY, HASH) también van al `.env`. Los argumentos con espacios se escriben entre comillas simples en `config.sh` (`-e 'MSG=hola mundo'`), y las variables del `.env` cuyo valor tiene espacios, comillas o `\` se pasan como `-e VAR` (docker toma el valor del `.env`, que se exporta). Así `config.sh` y `docker-compose.yml`, que son lo único que se versiona, no contienen rutas personales ni secretos. Lo mismo aplica al asistente paso a paso, y la plantilla de compose usa `${DATA_DIR}` definido en `.env`.
+    - Generación automática pegando un comando `docker run` completo (se analiza sin ejecutar nada). Los volúmenes con ruta absoluta del host (`/mnt/...`, `/home/...`, `~/...`) conservan su ubicación real, pero esa ruta se guarda en el `.env` del servicio como `<SERVICIO>_<CARPETA>_DIR` y en `config.sh` queda `${VAR}`; los relativos, `$PWD` o volúmenes con nombre se mapean a `${USER_HOME}/config/<nombre del destino>` y el `.env` recibe `USER_HOME=<carpeta del servicio>`. Las variables `-e` sensibles (PASS, TOKEN, SECRET, KEY, HASH) también van al `.env`. Los argumentos con espacios se escriben entre comillas simples en `config.sh` (`-e 'MSG=hola mundo'`), y las variables del `.env` cuyo valor tiene espacios, comillas o `\` se pasan como `-e VAR` (docker toma el valor del `.env`, que en modo `run` se exporta). Así `config.sh` y `docker-compose.yml`, que son lo único que se versiona, no contienen rutas personales ni secretos. Lo mismo aplica al asistente paso a paso, y la plantilla de compose usa `${DATA_DIR}` definido en `.env`.
     - Asistente guiado interactivo paso a paso para crear servicios `docker run` o `docker compose`.
 
 > **Convención de rutas:** el `.env` de cada servicio en modo `run` define `USER_HOME` como la carpeta del propio servicio, y su `config.sh` usa rutas cortas (`${USER_HOME}/config`). Como el `.env` se carga antes que `config.sh`, las rutas personales quedan solo en el `.env`.
+
+> **Cómo se lee el `.env`:** `update.sh` no lo ejecuta con bash: lo lee línea a línea con las mismas reglas que docker compose (`CLAVE=valor`; `'valor'` literal, sin expandir `$`; `"valor"` con `${VAR}` y escapes; `# comentario` tras un espacio). Así los valores con `$` o espacios llegan intactos. En modo `run` las claves se exportan para `docker run -e CLAVE`; en modo `compose` no se exportan y docker compose lee su `.env` directamente, para que el entorno del script nunca tenga prioridad sobre el fichero.
 
 ---
 
@@ -301,7 +304,7 @@ DO_BACKUP=false
 
 ### Etiquetas de imagen
 
-Casi todos los servicios usan `latest` (MeTube sin etiqueta, que equivale a `latest`). Excepciones: Immich `release`, FileBrowser `stable`, Tinyauth `v5` (fijada a la versión mayor 5) y Tvspy `dev`. Son etiquetas que avanzan solas, así que la comprobación (`c`) avisa cuando hay una imagen nueva y la actualización la descarga. Immich puede limitarse a una versión mayor con `IMMICH_VERSION=v3` en su `.env` (no se versiona): así recibe las actualizaciones de la v3 pero no salta a una v4 sin que lo cambies. Antes de actualizar servicios con base de datos (Immich, Vaultwarden) conviene revisar sus notas de versión y hacer backup (`k`).
+Casi todos los servicios usan `latest` (MeTube sin etiqueta, que equivale a `latest`). Excepciones: Immich `v3` (fijada a la versión mayor 3), FileBrowser `stable`, Tinyauth `v5` (fijada a la versión mayor 5) y Tvspy `dev`. Son etiquetas que avanzan solas, así que la comprobación (`c`) avisa cuando hay una imagen nueva y la actualización la descarga. Immich usa por defecto `v3`: recibe las actualizaciones de la v3 pero no salta a una v4 sin que lo cambies. Se sobrescribe con `IMMICH_VERSION` en su `.env` (no se versiona), por ejemplo `v3.4.1` para fijar una versión exacta; `config.sh` usa la misma variable para la comprobación de actualizaciones. Antes de actualizar servicios con base de datos (Immich, Vaultwarden) conviene revisar sus notas de versión y hacer backup (`k`).
 
 ---
 
@@ -319,7 +322,7 @@ TINYAUTH_AUTH_USERS='usuario1:$2a$10$...,usuario2:$2a$10$...'
 ```
 
 - `TINYAUTH_APPURL`: URL pública completa de tinyauth, con `https://` y sin barra final.
-- `TINYAUTH_AUTH_USERS`: uno o varios usuarios `usuario:hash` separados por comas, **entre comillas simples y sin `$$`** (`update.sh` también carga el `.env` con bash). Cada usuario se genera con:
+- `TINYAUTH_AUTH_USERS`: uno o varios usuarios `usuario:hash` separados por comas, **entre comillas simples y sin `$$`** (así docker compose y `update.sh` los leen igual, sin expandir los `$`). Cada usuario se genera con:
   ```bash
   docker run -it --rm ghcr.io/tinyauthapp/tinyauth:v5 user create --interactive
   ```
@@ -385,6 +388,35 @@ location /tinyauth {
 
 - ✅ Webs que usas solo desde el navegador y sin login propio (o con uno débil): MeTube, IT-Tools, Bento PDF, Stirling PDF, Homepage, ConvertX…
 - ❌ Servicios que usan **apps o clientes** (Vaultwarden, Immich, JDownloader/MyJD, WireGuard…): sus apps no pueden pasar por el login de tinyauth y dejarían de conectar. Ya tienen su propio login.
+
+### Immich (puerto 2283): versión y copias de la base de datos
+
+**Versión.** El compose usa `${IMMICH_VERSION:-v3}`. Para pasar a una nueva versión mayor (v4…), primero lee sus notas de versión y sustituye `docker-compose.yml` por el oficial de esa release (`https://github.com/immich-app/immich/releases/latest/download/docker-compose.yml`), conservando las adaptaciones locales que se explican en su cabecera. Después cambia `IMMICH_VERSION` en el `.env` y actualiza. Las imágenes de Postgres y Valkey van fijadas por digest y **solo deben cambiarse cuando cambie el compose oficial**.
+
+**Copias de la base de datos.** No uses `DO_BACKUP=true` (ni copias de ficheros) sobre la carpeta de Postgres (`DB_DATA_LOCATION`) con la base de datos en marcha: una copia de ficheros hecha en caliente puede quedar inconsistente y no restaurarse. Immich ya hace volcados lógicos (`pg_dump`) automáticos:
+
+- Se guardan en `UPLOAD_LOCATION/backups/` (`immich-db-backup-*.sql.gz`). Por defecto se crean a diario a las 02:00 y se conservan los 14 últimos.
+- **Comprobar que están activos:** en Immich, *Administración → Ajustes → Copias de seguridad de la base de datos* (*Database Dump Settings*) debe estar habilitado. En el servidor, `ls -lt "$UPLOAD_LOCATION/backups" | head` debe mostrar un fichero de las últimas 24 h.
+- Copia `UPLOAD_LOCATION` completo (fotos + `backups/`) fuera del servidor, por ejemplo con Backrest. Así quedan cubiertos tanto los ficheros como la base de datos.
+
+**Restaurar.** Hay dos formas:
+
+- **Desde la web (recomendado):** en *Administración → Ajustes*, sección *Restaurar copia de la base de datos*. En una instalación nueva, la pantalla de bienvenida ofrece *Restore from backup*. Antes de restaurar, Immich crea automáticamente un punto de restauración y vuelve a él si la restauración falla.
+- **Por línea de comandos** (procedimiento oficial, desde `immich-app/`; ⚠️ borra la base de datos actual):
+
+```bash
+docker compose down
+# Vaciar la carpeta de Postgres (DB_DATA_LOCATION del .env) para partir de cero:
+# sudo rm -rf "<DB_DATA_LOCATION>"
+docker compose create
+docker start immich_postgres && sleep 10
+gunzip --stdout "<UPLOAD_LOCATION>/backups/immich-db-backup-XXXX.sql.gz" \
+| sed "s/SELECT pg_catalog.set_config('search_path', '', false);/SELECT pg_catalog.set_config('search_path', 'public, pg_catalog', true);/g" \
+| docker exec -i immich_postgres psql --dbname=<DB_DATABASE_NAME> --username=<DB_USERNAME> --single-transaction --set ON_ERROR_STOP=on
+docker compose up -d
+```
+
+Restaura con la misma versión de Immich que generó el volcado, o con una compatible.
 
 ### Toolbox (puerto 8090)
 
