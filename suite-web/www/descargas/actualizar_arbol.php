@@ -168,7 +168,7 @@ function generarArbolDescargas() {
         'children' => array_merge($finalDirs, $finalFiles)
     ];
 
-    $jsonStr = json_encode($tree, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    $jsonStr = json_encode($tree, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
     // Guardar respaldo en disco
     @file_put_contents($rootDir . '/tree.json', $jsonStr);

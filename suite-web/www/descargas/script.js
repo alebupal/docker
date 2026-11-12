@@ -255,7 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.tree-item-row').forEach(row => {
             row.classList.remove('active');
         });
-        const selectedNode = document.querySelector(`.tree-node[data-path="${path}"] > .tree-item-row`);
+        const selectedNode = document.querySelector(`.tree-node[data-path="${CSS.escape(path)}"] > .tree-item-row`);
         if (selectedNode) {
             selectedNode.classList.add('active');
             // Asegurar que sus padres estén expandidos
@@ -422,7 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="item-info">
                     <span class="item-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
-                    <span class="item-type-label">${escapeHtml(file.category || 'Archivo')} · ${(file.extension || '').toUpperCase()}</span>
+                    <span class="item-type-label">${escapeHtml(file.category || 'Archivo')} · ${escapeHtml((file.extension || '').toUpperCase())}</span>
                 </div>
                 <span class="item-size">${escapeHtml(file.size_formatted)}</span>
                 <span class="item-date">${escapeHtml(file.date_formatted)}</span>

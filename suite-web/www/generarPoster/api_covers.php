@@ -11,6 +11,28 @@ if (!is_dir($coversDir)) {
     mkdir($coversDir, 0755, true);
 }
 
+// Únicas extensiones aceptadas en cover/ y cover_download/ (nunca .php, .phtml, .htaccess...)
+const ALLOWED_IMAGE_EXT = ['png', 'webp', 'jpg', 'jpeg'];
+const IMAGE_TYPE_EXT = [IMAGETYPE_PNG => 'png', IMAGETYPE_JPEG => 'jpg', IMAGETYPE_WEBP => 'webp'];
+
+/**
+ * Devuelve la extensión real ('png'|'jpg'|'webp') si $data es una imagen válida, o null.
+ */
+function detectImageExt(string $data): ?string {
+    $info = @getimagesizefromstring($data);
+    if (!$info || empty($info[0]) || empty($info[1])) return null;
+    return IMAGE_TYPE_EXT[$info[2]] ?? null;
+}
+
+/**
+ * Ajusta la extensión del nombre a la del contenido real (jpg y jpeg se consideran iguales).
+ */
+function forceImageExt(string $name, string $realExt): string {
+    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+    if ($ext === $realExt || ($realExt === 'jpg' && $ext === 'jpeg')) return $name;
+    return pathinfo($name, PATHINFO_FILENAME) . '.' . $realExt;
+}
+
 function formatBytes($bytes) {
     if ($bytes >= 1048576) return number_format($bytes / 1048576, 2) . ' MB';
     if ($bytes >= 1024) return number_format($bytes / 1024, 1) . ' KB';
@@ -18,7 +40,7 @@ function formatBytes($bytes) {
 }
 
 function listarCaratulas($dir) {
-    $allowed = ['png', 'webp', 'jpg', 'jpeg'];
+    $allowed = ALLOWED_IMAGE_EXT;
     $items = scandir($dir);
     $covers = [];
 
@@ -70,14 +92,21 @@ if ($method === 'POST') {
         $filename = $_POST['filename'] ?? '';
         $filename = basename($filename); // Evitar Directory Traversal
 
-        if (!$filename) {
+        if (!$filename || str_starts_with($filename, '.')) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nombre de archivo no especificado']);
             exit;
         }
 
+        // Solo plantillas de imagen (protege .psd, .pdf u otros ficheros de la carpeta)
+        if (!in_array(strtolower(pathinfo($filename, PATHINFO_EXTENSION)), ALLOWED_IMAGE_EXT, true)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Solo se pueden eliminar plantillas PNG, WebP o JPG'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
         $targetPath = $coversDir . DIRECTORY_SEPARATOR . $filename;
-        if (file_exists($targetPath)) {
+        if (is_file($targetPath)) {
             unlink($targetPath);
             echo json_encode([
                 'success' => true,
@@ -106,9 +135,16 @@ if ($method === 'POST') {
         $safeName = preg_replace('/[\/\\\\:*?"<>|]/', '', $safeName);
         $safeName = trim($safeName);
 
-        if (empty($safeName)) {
+        if ($safeName === '' || str_starts_with($safeName, '.')) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nombre de archivo no especificado'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        // Solo se aceptan nombres con extensión de imagen (evita subir .php ejecutables)
+        if (!in_array(strtolower(pathinfo($safeName, PATHINFO_EXTENSION)), ALLOWED_IMAGE_EXT, true)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Solo se pueden guardar imágenes PNG, WebP o JPG'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -128,6 +164,15 @@ if ($method === 'POST') {
             echo json_encode(['success' => false, 'error' => 'No se recibieron datos de imagen'], JSON_UNESCAPED_UNICODE);
             exit;
         }
+
+        // El contenido debe ser una imagen real; la extensión se ajusta a su tipo
+        $realExt = detectImageExt($imageData);
+        if ($realExt === null) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Los datos recibidos no son una imagen PNG, WebP o JPG válida'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        $safeName = forceImageExt($safeName, $realExt);
 
         // Si la carpeta no es escribible, intentar forzar permisos
         if (!is_writable($downloadDir)) {
@@ -176,15 +221,16 @@ if ($method === 'POST') {
         $origName = basename($file['name']);
         $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
 
-        if (!in_array($ext, ['png', 'webp', 'jpg', 'jpeg'])) {
+        $realExt = detectImageExt((string) @file_get_contents($file['tmp_name']));
+        if (!in_array($ext, ALLOWED_IMAGE_EXT, true) || $realExt === null) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Solo se permiten imágenes PNG, WebP o JPG']);
             exit;
         }
 
-        // Limpiar el nombre para URL segura
+        // Limpiar el nombre para URL segura y usar la extensión del contenido real
         $cleanBase = preg_replace('/[^a-zA-Z0-9_\-]/', '_', pathinfo($origName, PATHINFO_FILENAME));
-        $finalName = $cleanBase . '.' . $ext;
+        $finalName = forceImageExt($cleanBase . '.' . $ext, $realExt);
         $destPath = $coversDir . DIRECTORY_SEPARATOR . $finalName;
 
         if (move_uploaded_file($file['tmp_name'], $destPath)) {

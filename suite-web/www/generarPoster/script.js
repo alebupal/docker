@@ -94,6 +94,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const toastContainer = document.getElementById('toastContainer');
 
     // =========================================================================
+    // Escapado HTML (todo texto de usuario, ficheros o TMDb que se pinte con innerHTML)
+    // =========================================================================
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    // =========================================================================
     // Notificaciones Toast
     // =========================================================================
     function showToast(message, type = 'info') {
@@ -104,7 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (type === 'success') icon = '✅';
         if (type === 'warning') icon = '⚠️';
 
-        toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+        toast.innerHTML = `<span>${icon}</span> <span>${escapeHtml(message)}</span>`;
         toastContainer.appendChild(toast);
 
         setTimeout(() => {
@@ -1274,8 +1286,8 @@ document.addEventListener('DOMContentLoaded', () => {
             card.className = `cover-card special ${p.isDefault ? '' : 'custom-pack'} ${state.cover === p.id ? 'active' : ''}`;
             card.dataset.cover = p.id;
             card.innerHTML = `
-                <div class="cover-card-title">${p.isDefault ? '✨ ' : '📦 '}${p.name}</div>
-                <div class="cover-card-tag">${p.tag || (p.covers.length + ' banners en 1 clic')}</div>
+                <div class="cover-card-title">${p.isDefault ? '✨ ' : '📦 '}${escapeHtml(p.name)}</div>
+                <div class="cover-card-tag">${escapeHtml(p.tag || (p.covers.length + ' banners en 1 clic'))}</div>
             `;
             packsGrid.appendChild(card);
         });
@@ -1408,22 +1420,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 card.className = 'cover-item-card';
                 card.innerHTML = `
                     <div class="cover-item-preview">
-                        <img src="${item.url || ('cover/' + item.filename)}?v=${item.mtime || Date.now()}" alt="${item.filename}" loading="lazy">
+                        <img src="${escapeHtml(item.url || ('cover/' + encodeURIComponent(item.filename)))}?v=${escapeHtml(item.mtime || Date.now())}" alt="${escapeHtml(item.filename)}" loading="lazy">
                     </div>
                     <div class="cover-item-info">
-                        <div class="cover-item-name" title="${item.filename}">${item.filename}</div>
+                        <div class="cover-item-name" title="${escapeHtml(item.filename)}">${escapeHtml(item.filename)}</div>
                         <div class="cover-item-meta">
-                            <span>${item.size_formatted || 'Base'}</span>
+                            <span>${escapeHtml(item.size_formatted || 'Base')}</span>
                             <span class="badge" style="font-size:0.65rem;">Servidor</span>
                         </div>
                         <div class="cover-item-actions">
-                            <button type="button" class="cover-item-btn use-btn" data-cover-key="${item.key}">
+                            <button type="button" class="cover-item-btn use-btn" data-cover-key="${escapeHtml(item.key)}">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <polyline points="20 6 9 17 4 12"></polyline>
                                 </svg>
                                 Usar
                             </button>
-                            <button type="button" class="cover-item-btn delete-btn" title="Eliminar del servidor" data-filename="${item.filename}">
+                            <button type="button" class="cover-item-btn delete-btn" title="Eliminar del servidor" data-filename="${escapeHtml(item.filename)}">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <polyline points="3 6 5 6 21 6"></polyline>
                                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -1527,12 +1539,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const card = document.createElement('div');
                 card.className = 'pack-card-item';
                 
-                const pillsHtml = pack.covers.map(c => `<span class="pack-cover-pill">${c}</span>`).join('');
+                const pillsHtml = pack.covers.map(c => `<span class="pack-cover-pill">${escapeHtml(c)}</span>`).join('');
 
                 card.innerHTML = `
                     <div class="pack-card-details">
                         <div class="pack-card-title">
-                            ${pack.name}
+                            ${escapeHtml(pack.name)}
                             ${pack.isDefault ? '<span class="badge" style="font-size:0.65rem;">Predeterminado</span>' : ''}
                         </div>
                         <div class="pack-covers-tags">
@@ -1607,8 +1619,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const label = document.createElement('label');
                 label.className = 'pack-cover-checkbox-label';
                 label.innerHTML = `
-                    <input type="checkbox" value="${c.key}" class="pack-checkbox" style="cursor:pointer;">
-                    <span>${c.name || c.key.replace(/_/g, ' ')}</span>
+                    <input type="checkbox" value="${escapeHtml(c.key)}" class="pack-checkbox" style="cursor:pointer;">
+                    <span>${escapeHtml(c.name || c.key.replace(/_/g, ' '))}</span>
                 `;
                 packCoversPicker.appendChild(label);
             });
@@ -1689,8 +1701,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 card.className = `cover-card ${state.cover === coverKey ? 'active' : ''}`;
                 card.dataset.cover = coverKey;
                 card.innerHTML = `
-                    <div class="cover-card-title">${displayName}</div>
-                    <div class="cover-card-tag">${filename}</div>
+                    <div class="cover-card-title">${escapeHtml(displayName)}</div>
+                    <div class="cover-card-tag">${escapeHtml(filename)}</div>
                 `;
                 coverGrid.appendChild(card);
             });
@@ -2102,7 +2114,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const statusIcon = item.status === 'saved' ? '✅' : (item.status === 'loaded' ? '👁️' : (item.status === 'error' ? '❌' : '⏳'));
                 row.innerHTML = `
                     <span class="batch-item-num">${idx + 1}.</span>
-                    <span class="batch-item-title">${item.title || item.query}</span>
+                    <span class="batch-item-title">${escapeHtml(item.title || item.query)}</span>
                     <span class="batch-item-status">${statusIcon}</span>
                 `;
                 row.addEventListener('click', () => {
@@ -2433,16 +2445,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 langBadgeHtml = `<span class="badge-lang badge-lang-textless">✨ Sin texto</span>`;
                 langLabel = 'Sin texto / Original';
             } else {
-                langBadgeHtml = `<span class="badge-lang badge-lang-other">🌐 ${(p.lang || 'OT').toUpperCase()}</span>`;
+                langBadgeHtml = `<span class="badge-lang badge-lang-other">🌐 ${escapeHtml((p.lang || 'OT').toUpperCase())}</span>`;
                 langLabel = p.lang ? p.lang.toUpperCase() : 'Otro';
             }
 
-            const sizeBadgeHtml = p.size ? `<span class="badge-size">${p.size}</span>` : '';
+            const sizeBadgeHtml = p.size ? `<span class="badge-size">${escapeHtml(p.size)}</span>` : '';
             const marginBadgeHtml = p.has_margin ? `<span class="badge-margin" title="Espacio libre arriba y abajo para carátula">🛡️ Margen libre</span>` : '';
 
             card.innerHTML = `
                 <div class="tmdb-poster-img-wrap">
-                    <img src="${p.thumb_url}" alt="Carátula ${idx + 1}" class="tmdb-poster-img" loading="lazy">
+                    <img src="${escapeHtml(p.thumb_url)}" alt="Carátula ${idx + 1}" class="tmdb-poster-img" loading="lazy">
                     <div class="tmdb-poster-badges">
                         ${langBadgeHtml}
                         ${sizeBadgeHtml}
@@ -2618,14 +2630,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 row.className = 'tmdb-search-item';
                 const typeLabel = item.type === 'tv' ? 'Serie' : 'Película';
                 const thumbImg = item.poster_thumb 
-                    ? `<img src="${item.poster_thumb}" class="tmdb-search-thumb" alt="${item.title}">` 
+                    ? `<img src="${escapeHtml(item.poster_thumb)}" class="tmdb-search-thumb" alt="${escapeHtml(item.title)}">` 
                     : `<div class="tmdb-search-thumb" style="display:flex;align-items:center;justify-content:center;font-size:0.6rem;color:var(--text-muted);">Sin foto</div>`;
 
                 row.innerHTML = `
                     ${thumbImg}
                     <div class="tmdb-search-info">
-                        <div class="tmdb-search-title">${item.title} ${item.year ? `(${item.year})` : ''}</div>
-                        <div class="tmdb-search-meta">${typeLabel} ${item.original_title && item.original_title !== item.title ? `· ${item.original_title}` : ''}</div>
+                        <div class="tmdb-search-title">${escapeHtml(item.title)} ${item.year ? `(${escapeHtml(item.year)})` : ''}</div>
+                        <div class="tmdb-search-meta">${typeLabel} ${item.original_title && item.original_title !== item.title ? `· ${escapeHtml(item.original_title)}` : ''}</div>
                     </div>
                 `;
 
