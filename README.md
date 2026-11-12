@@ -37,6 +37,7 @@ docker/
 | Backrest | `backrest` | compose | `ghcr.io/garethgeorge/backrest:latest` | 9898 |
 | BentoPDF | `bentopdf` | compose | `bentopdfteam/bentopdf:latest` | 3004 |
 | ConvertX | `convertx` | compose | `ghcr.io/c4illin/convertx:latest` | 3005 |
+| Dockpanel | `dockpanel` | run | `alebupal/dockpanel:latest` | host (8092) |
 | Downtify | `downtify` | run | `ghcr.io/henriquesebastiao/downtify:latest` | 8800 |
 | DuckDNS | `duckdns` | run | `lscr.io/linuxserver/duckdns:latest` | — |
 | FileBrowser Quantum | `filebrowser` | compose | `ghcr.io/gtsteffaniak/filebrowser:stable` | 8082 |
@@ -245,6 +246,10 @@ Puedes invocar todas las funciones directamente mediante argumentos para automat
 
 # Configurar ruta base persistente del usuario
 ./update.sh --set-user-home /home/usuario
+
+# Salidas en TSV para scripts y para el panel web Dockpanel (sin colores ni preguntas)
+./update.sh --list        # carpeta, nombre, modo, puerto, RUNNING|STOPPED|OFFLINE, imagen, contenedor, backup
+./update.sh --check-tsv   # carpeta, update|ok|error
 ```
 
 ---
@@ -426,6 +431,16 @@ Utilidades del servidor en un único contenedor (`alebupal/toolbox:latest`): exp
 - Abrir menú CLI por SSH: `docker exec -it toolbox toolbox`
 - Consultar progreso/logs de la web por SSH: `docker exec -it toolbox toolbox web estado` y `docker exec -it toolbox toolbox web logs`
 - Ver ayuda detallada de todos los comandos SSH: `docker exec -it toolbox toolbox readme` (el código y su README viven en el repositorio aparte `toolbox`).
+
+### Dockpanel (puerto 8092)
+
+Interfaz web de este mismo `update.sh` (`alebupal/dockpanel:latest`): tabla de servicios con estado, puerto y aviso de actualización, botones para iniciar/detener/reiniciar/recrear/actualizar/logs/backup/política (por servicio o todos), comprobación de actualizaciones y una **terminal en el navegador** donde se ve la salida real del script y se responden sus preguntas (incluido el menú interactivo completo). No reimplementa nada: ejecuta `update.sh` del host con `chroot /host`, y las tareas que modifican algo corren en un contenedor auxiliar efímero, así que puede actualizarse a sí mismo y las tareas siguen aunque se cierre la página.
+
+- Desplegar/actualizar: `./update.sh dockpanel`
+- Mismo script desde el contenedor: `docker exec -it dockpanel update.sh [opciones]` (sin `-t` para cron); las tareas que lanza aparecen también en la web.
+- ⚠️ Tiene control total del host: publícalo solo detrás de Tinyauth o con `AUTH_USER`/`AUTH_PASSWORD` (ver `dockpanel/config.sh`).
+- Fija la ruta base una vez (`./update.sh --set-user-home …` o botón ⚙️): sin `.user_home`, dentro del panel `HOME` es `/root`.
+- El código y su README viven en el repositorio aparte `dockpanel`.
 
 ## 📋 Requisitos del Sistema
 

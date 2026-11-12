@@ -76,7 +76,7 @@ check_prerequisites() {
 
   # buildx es opcional: solo se usa para comparar digests remotos (opción 'c' / --check)
   if ! docker buildx version >/dev/null 2>&1; then
-    echo -e "${YELLOW}⚠️ Aviso: 'docker buildx' no está disponible. La comprobación de actualizaciones (c / --check) devolverá error.${NC}"
+    echo -e "${YELLOW}⚠️ Aviso: 'docker buildx' no está disponible. La comprobación de actualizaciones (c / --check) devolverá error.${NC}" >&2
   fi
 }
 
@@ -2532,7 +2532,10 @@ check_update() {
 # ─────────────────────────────
 # Comprobación de Actualizaciones en Paralelo
 # ─────────────────────────────
+# Uso: check_all_updates_parallel [tsv]
+# Con "tsv" imprime solo "carpeta<TAB>update|ok|error" por servicio (salida para el panel web).
 check_all_updates_parallel() {
+  local out_fmt="$1"
   local tmp_dir
   tmp_dir=$(mktemp -d "/tmp/docker_check_XXXXXX" 2>/dev/null || mktemp -d)
   local max_jobs=6
@@ -2556,6 +2559,11 @@ check_all_updates_parallel() {
     load_service_config "$s"
     local status="error"
     [ -f "$tmp_dir/$s" ] && status=$(cat "$tmp_dir/$s")
+    if [ "$out_fmt" = "tsv" ]; then
+      printf '%s\t%s\n' "$s" "$status"
+      [ "$status" = "update" ] && UPDATABLE+=("$s")
+      continue
+    fi
     case "$status" in
       update)
         echo -e " 🟢 ${GREEN}$NAME ($s)${NC} → ¡Actualización disponible!"
@@ -2839,6 +2847,28 @@ show_command() {
 }
 
 # ─────────────────────────────
+# Listado legible por máquina (panel web)
+# ─────────────────────────────
+# Una línea por servicio, separada por tabuladores:
+#   carpeta  nombre  modo  puerto  estado(RUNNING|STOPPED|OFFLINE)  imagen  contenedor  backup
+list_services_tsv() {
+  refresh_docker_state_cache
+  local s st p
+  for s in "${SERVICES[@]}"; do
+    load_service_config "$s"
+    st=$(get_service_status "$s")
+    case "$st" in
+      *RUNNING*) st="RUNNING" ;;
+      *STOPPED*) st="STOPPED" ;;
+      *) st="OFFLINE" ;;
+    esac
+    p=$(get_service_port "$s")
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$s" "${NAME//$'\t'/ }" "$MODE" "${p#:}" "$st" "$IMAGE" "$CONTAINER_NAME" "$DO_BACKUP"
+  done
+}
+
+# ─────────────────────────────
 # Pantalla de Ayuda y Documentación
 # ─────────────────────────────
 show_help() {
@@ -2884,6 +2914,8 @@ show_help() {
   echo -e "  ${YELLOW}./update.sh -r | --restore${NC}               Asistente de restauración de copias de seguridad."
   echo -e "  ${YELLOW}./update.sh -n [comando_docker_run]${NC}     Crear servicio interactivamente o desde comando."
   echo -e "  ${YELLOW}./update.sh --set-user-home <ruta>${NC}      Guardar nueva ruta de usuario persistente."
+  echo -e "  ${YELLOW}./update.sh --list${NC}                       Listado de servicios en TSV (para scripts/panel web)."
+  echo -e "  ${YELLOW}./update.sh --check-tsv${NC}                  Comprobación de actualizaciones en TSV (carpeta, update|ok|error)."
   echo -e "  ${YELLOW}./update.sh --help | -?${NC}                  Mostrar esta ayuda."
   echo -e "================================================================================${NC}"
 }
@@ -2895,7 +2927,7 @@ check_prerequisites
 # La retención de backups solo se aplica en las operaciones que modifican algo (no en ayuda,
 # logs, monitor, restauración, comprobación de versiones ni al mostrar comandos)
 case "$1" in
-  --help|-\?|help|--logs|-l|--stats|-m|--restore|-r|--show|-s|--check|-c) ;;
+  --help|-\?|help|--logs|-l|--stats|-m|--restore|-r|--show|-s|--check|-c|--list|--check-tsv) ;;
   *) clean_old_backups ;;
 esac
 
@@ -2968,6 +3000,12 @@ discover_services
 if [ "$1" = "--check" ] || [ "$1" = "-c" ]; then
   echo -e "${BLUE}📊 Comprobando actualizaciones en paralelo (SHA256)...${NC}"
   check_all_updates_parallel
+  exit 0
+elif [ "$1" = "--list" ]; then
+  list_services_tsv
+  exit 0
+elif [ "$1" = "--check-tsv" ]; then
+  check_all_updates_parallel tsv
   exit 0
 elif [ "$1" = "--show" ] || [ "$1" = "-s" ]; then
   for s in "${SERVICES[@]}"; do
