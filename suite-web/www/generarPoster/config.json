@@ -1,7 +1,4 @@
 {
-    "tmdb": {
-        "api_key": ""
-    },
     "cache": {
         "ttl_seconds": 86400
     },

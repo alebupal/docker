@@ -20,6 +20,7 @@
 suite-web/www/generarPassword/
 suite-web/www/generarPoster.zip
 suite-web/www/generarPoster/cache/
+suite-web/www/generarPoster/.tmdb_api_key
 suite-web/www/generarPoster/cover_download/
 suite-web/www/generarPoster/cover/*.psd
 suite-web/www/generarPoster/cover/*.pdf

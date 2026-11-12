@@ -12,7 +12,10 @@ header('Cache-Control: no-cache, no-store, must-revalidate');
 
 set_time_limit(25);
 
+require_once __DIR__ . '/tmdb_key.php';
+
 $configFile = __DIR__ . '/config.json';
+tmdb_migrate_key($configFile);
 $cacheDir = __DIR__ . '/cache';
 if (!is_dir($cacheDir)) {
     @mkdir($cacheDir, 0755, true);
@@ -20,7 +23,6 @@ if (!is_dir($cacheDir)) {
 
 function loadConfig($path) {
     $defaults = [
-        'tmdb' => ['api_key' => ''],
         'cache' => ['ttl_seconds' => 86400],
         'margin' => ['threshold' => 18, 'percent' => 14],
         'packs' => []
@@ -35,7 +37,8 @@ function loadConfig($path) {
 }
 
 function saveConfig($path, $data) {
-    @file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    $data = tmdb_strip_key($data);
+    @file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), LOCK_EX);
 }
 
 function formatBytes($bytes) {
@@ -94,7 +97,7 @@ function clearCacheDir($dir) {
 }
 
 $appConfig = loadConfig($configFile);
-$serverApiKey = trim($appConfig['tmdb']['api_key'] ?? '');
+$serverApiKey = tmdb_get_key();
 $cacheTtl = intval($appConfig['cache']['ttl_seconds'] ?? 86400);
 if ($cacheTtl <= 0) $cacheTtl = 86400;
 
@@ -168,17 +171,19 @@ function tmdbCurlParallel($requests) {
 }
 
 $action = $_REQUEST['action'] ?? $_GET['action'] ?? $_POST['action'] ?? '';
-$apiKey = trim($_REQUEST['api_key'] ?? '') ?: $serverApiKey;
+// La API Key solo se lee del servidor (.tmdb_api_key); nunca viaja desde ni hacia el navegador.
+$apiKey = $serverApiKey;
 
-// 1. Guardar API Key y opciones en servidor (en config.json)
+// 1. Guardar API Key (fichero seguro) y opciones (config.json) en el servidor
 if ($action === 'save_key' || $action === 'save_config') {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        sendJson(['success' => false, 'error' => 'Método no permitido'], 405);
+    }
     $cfg = loadConfig($configFile);
     if (isset($_POST['api_key'])) {
-        $inputKey = trim($_POST['api_key']);
-        if (!isset($cfg['tmdb']) || !is_array($cfg['tmdb'])) {
-            $cfg['tmdb'] = [];
+        if (!tmdb_set_key((string) $_POST['api_key'])) {
+            sendJson(['success' => false, 'error' => 'API Key con formato no válido o no se pudo guardar'], 400);
         }
-        $cfg['tmdb']['api_key'] = $inputKey;
     }
     if (isset($_POST['margin_threshold'])) {
         if (!isset($cfg['margin']) || !is_array($cfg['margin'])) {
@@ -193,11 +198,11 @@ if ($action === 'save_key' || $action === 'save_config') {
         $cfg['margin']['percent'] = max(1, min(40, intval($_POST['margin_percent'])));
     }
     saveConfig($configFile, $cfg);
-    $savedKey = $cfg['tmdb']['api_key'] ?? '';
+    $savedKey = tmdb_get_key();
     sendJson([
         'success' => true,
-        'has_key' => !empty($savedKey),
-        'api_key_masked' => !empty($savedKey) ? substr($savedKey, 0, 4) . '...' . substr($savedKey, -4) : '',
+        'has_key' => $savedKey !== '',
+        'api_key_masked' => tmdb_mask_key($savedKey),
         'margin' => $cfg['margin'] ?? ['threshold' => 18, 'percent' => 14]
     ]);
 }
@@ -205,12 +210,12 @@ if ($action === 'save_key' || $action === 'save_config') {
 // 2. Obtener estado de configuración, margen y estadísticas de caché
 if ($action === 'get_config') {
     $cfg = loadConfig($configFile);
-    $curKey = trim($cfg['tmdb']['api_key'] ?? '');
+    $curKey = tmdb_get_key();
     $cacheInfo = getCacheInfo($cacheDir);
     sendJson([
         'success' => true,
-        'has_server_key' => !empty($curKey),
-        'api_key_masked' => !empty($curKey) ? substr($curKey, 0, 4) . '...' . substr($curKey, -4) : '',
+        'has_server_key' => $curKey !== '',
+        'api_key_masked' => tmdb_mask_key($curKey),
         'margin' => $cfg['margin'] ?? ['threshold' => 18, 'percent' => 14],
         'cache' => $cacheInfo
     ]);
@@ -280,7 +285,7 @@ if ($action === 'fetch_direct') {
 
     // A. Si hay API Key disponible, consultar la API oficial
     if (!empty($apiKey)) {
-        $apiUrl = "https://api.themoviedb.org/3/{$detectedType}/{$id}?api_key={$apiKey}&language=es-ES";
+        $apiUrl = "https://api.themoviedb.org/3/{$detectedType}/{$id}?api_key=" . rawurlencode($apiKey) . "&language=es-ES";
         $apiRes = tmdbCurl($apiUrl);
         if ($apiRes['status'] === 200) {
             $data = json_decode($apiRes['body'], true);
@@ -290,7 +295,7 @@ if ($action === 'fetch_direct') {
             $posterPath = $data['poster_path'] ?? '';
 
             // Obtener imágenes
-            $imagesUrl = "https://api.themoviedb.org/3/{$detectedType}/{$id}/images?api_key={$apiKey}";
+            $imagesUrl = "https://api.themoviedb.org/3/{$detectedType}/{$id}/images?api_key=" . rawurlencode($apiKey);
             $imgRes = tmdbCurl($imagesUrl);
             $posters = [];
             if ($imgRes['status'] === 200) {
@@ -549,7 +554,7 @@ if ($action === 'search') {
         sendJson(['success' => false, 'error' => 'Se requiere una API Key de TMDb para buscar por título. Puedes configurarla arriba o usar la pestaña de ID / Enlace directo.'], 400);
     }
 
-    $apiUrl = "https://api.themoviedb.org/3/search/multi?api_key={$apiKey}&language=es-ES&query=" . urlencode($searchQuery);
+    $apiUrl = "https://api.themoviedb.org/3/search/multi?api_key=" . rawurlencode($apiKey) . "&language=es-ES&query=" . urlencode($searchQuery);
     $res = tmdbCurl($apiUrl);
 
     if ($res['status'] !== 200) {

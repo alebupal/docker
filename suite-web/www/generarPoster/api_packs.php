@@ -5,11 +5,13 @@
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-cache, no-store, must-revalidate');
 
+require_once __DIR__ . '/tmdb_key.php';
+
 $configFile = __DIR__ . '/config.json';
+tmdb_migrate_key($configFile);
 
 function loadFullConfig($path) {
     $defaults = [
-        'tmdb' => ['api_key' => ''],
         'cache' => ['ttl_seconds' => 86400],
         'packs' => []
     ];
@@ -19,9 +21,6 @@ function loadFullConfig($path) {
         if (is_array($data)) {
             if (!isset($data['packs']) || !is_array($data['packs'])) {
                 $data['packs'] = [];
-            }
-            if (!isset($data['tmdb']) || !is_array($data['tmdb'])) {
-                $data['tmdb'] = $defaults['tmdb'];
             }
             if (!isset($data['cache']) || !is_array($data['cache'])) {
                 $data['cache'] = $defaults['cache'];
@@ -34,7 +33,8 @@ function loadFullConfig($path) {
 }
 
 function saveFullConfig($path, $cfg) {
-    file_put_contents($path, json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    $cfg = tmdb_strip_key($cfg);
+    file_put_contents($path, json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), LOCK_EX);
 }
 
 $fullConfig = loadFullConfig($configFile);

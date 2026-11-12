@@ -1782,20 +1782,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const tmdbCacheStats = document.getElementById('tmdbCacheStats');
     const btnClearTmdbCache = document.getElementById('btnClearTmdbCache');
 
-    function getTmdbApiKey() {
-        return localStorage.getItem('tmdb_api_key') || '';
+    // La API Key de TMDb vive solo en el servidor (.tmdb_api_key, no servido por Nginx ni versionado).
+    // El navegador nunca la recibe ni la envía en las URLs: solo sabe si existe y su versión enmascarada.
+    let tmdbHasServerKey = false;
+
+    function actualizarPlaceholderApiKey(masked) {
+        if (!tmdbApiKeyInput) return;
+        tmdbApiKeyInput.value = '';
+        tmdbApiKeyInput.placeholder = tmdbHasServerKey
+            ? `Guardada en el servidor (${masked}). Pega otra para sustituirla`
+            : 'Pega tu API Key...';
     }
 
-    function setTmdbApiKey(key) {
-        if (key) {
-            localStorage.setItem('tmdb_api_key', key);
-        } else {
-            localStorage.removeItem('tmdb_api_key');
-        }
-    }
-
-    if (tmdbApiKeyInput) {
-        tmdbApiKeyInput.value = getTmdbApiKey();
+    async function enviarApiKeyAlServidor(key) {
+        const formData = new FormData();
+        formData.append('api_key', key);
+        const res = await fetch('api_tmdb.php?action=save_config', { method: 'POST', body: formData });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+        tmdbHasServerKey = !!data.has_key;
+        actualizarPlaceholderApiKey(data.api_key_masked || '');
+        return data;
     }
 
     // Actualizar indicador de estadísticas de caché en disco
@@ -1835,8 +1842,19 @@ document.addEventListener('DOMContentLoaded', () => {
                         const c = data.cache;
                         tmdbCacheStats.textContent = `${c.count} ${c.count === 1 ? 'archivo' : 'archivos'} (${c.formatted})`;
                     }
-                    if (data.has_server_key && !getTmdbApiKey() && tmdbApiKeyInput) {
-                        tmdbApiKeyInput.placeholder = `Guardada en config.json (${data.api_key_masked})`;
+                    tmdbHasServerKey = !!data.has_server_key;
+                    actualizarPlaceholderApiKey(data.api_key_masked || '');
+
+                    // Migración: versiones anteriores guardaban la clave en localStorage
+                    let legacyKey = '';
+                    try { legacyKey = localStorage.getItem('tmdb_api_key') || ''; } catch {}
+                    if (legacyKey) {
+                        try {
+                            if (!tmdbHasServerKey) await enviarApiKeyAlServidor(legacyKey);
+                            localStorage.removeItem('tmdb_api_key');
+                        } catch (e) {
+                            console.warn('No se pudo migrar la API Key al servidor:', e);
+                        }
                     }
                     if (data.margin) {
                         marginConfig = data.margin;
@@ -1987,25 +2005,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnSaveTmdbKey) {
         btnSaveTmdbKey.addEventListener('click', async () => {
             const val = tmdbApiKeyInput.value.trim();
-            setTmdbApiKey(val);
 
-            // Persistir también en config.json en el servidor
-            if (window.location.protocol.startsWith('http')) {
-                try {
-                    const formData = new FormData();
-                    formData.append('api_key', val);
-                    formData.append('margin_threshold', marginConfig.threshold);
-                    formData.append('margin_percent', marginConfig.percent);
-                    await fetch('api_tmdb.php?action=save_config', {
-                        method: 'POST',
-                        body: formData
-                    });
-                } catch (e) {
-                    console.warn('Error guardando configuración en config.json:', e);
-                }
+            // Campo vacío: solo se borra la clave del servidor si se confirma expresamente
+            if (!val && (!tmdbHasServerKey || !confirm('¿Eliminar la API Key guardada en el servidor?'))) {
+                return;
             }
 
-            showToast(val ? 'API Key y configuración guardadas en config.json' : 'API Key eliminada de config.json', 'success');
+            try {
+                await enviarApiKeyAlServidor(val);
+            } catch (e) {
+                showToast(`Error guardando la API Key: ${e.message}`, 'danger');
+                return;
+            }
+
+            showToast(val ? 'API Key guardada en el servidor' : 'API Key eliminada del servidor', 'success');
             if (tmdbConfigSection) {
                 tmdbConfigSection.style.display = 'none';
                 if (btnTmdbToggleConfig) btnTmdbToggleConfig.classList.remove('active');
@@ -2487,7 +2500,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const apiKey = getTmdbApiKey();
         const origBtnText = btnFetchTmdb ? btnFetchTmdb.innerHTML : '';
         if (btnFetchTmdb) {
             btnFetchTmdb.disabled = true;
@@ -2500,7 +2512,7 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast('Consultando carátulas en The Movie Database...', 'info');
 
         try {
-            const url = `api_tmdb.php?action=fetch_direct&query=${encodeURIComponent(query.trim())}&type=${type}&api_key=${encodeURIComponent(apiKey)}`;
+            const url = `api_tmdb.php?action=fetch_direct&query=${encodeURIComponent(query.trim())}&type=${type}`;
             const response = await fetch(url);
             const data = await response.json();
 
@@ -2580,8 +2592,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const apiKey = getTmdbApiKey();
-        if (!apiKey) {
+        if (!tmdbHasServerKey) {
             showToast('Configura tu API Key de TMDb pulsando el icono ⚙️ para buscar por título', 'warning');
             return;
         }
@@ -2592,7 +2603,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tmdbSearchResults.innerHTML = '';
 
         try {
-            const url = `api_tmdb.php?action=search&query=${encodeURIComponent(q)}&api_key=${encodeURIComponent(apiKey)}`;
+            const url = `api_tmdb.php?action=search&query=${encodeURIComponent(q)}`;
             const res = await fetch(url);
             const data = await res.json();
 
