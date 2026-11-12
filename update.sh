@@ -2544,7 +2544,8 @@ check_update() {
 # Comprobación de Actualizaciones en Paralelo
 # ─────────────────────────────
 # Uso: check_all_updates_parallel [tsv]
-# Con "tsv" imprime solo "carpeta<TAB>update|ok|error" por servicio (salida para el panel web).
+# Con "tsv" imprime solo "carpeta<TAB>update|ok|error" por servicio (salida para el panel web),
+# cada línea en cuanto termina la comprobación de ese servicio (permite mostrar el progreso).
 check_all_updates_parallel() {
   local out_fmt="$1"
   local tmp_dir
@@ -2556,6 +2557,8 @@ check_all_updates_parallel() {
     (
       st=$(check_update "$s")
       echo "$st" > "$tmp_dir/$s"
+      # Línea corta escrita de una vez: no se mezcla con la de otros procesos en paralelo
+      [ "$out_fmt" = "tsv" ] && printf '%s\t%s\n' "$s" "$st"
     ) &
     ((current_jobs++))
     if [ $current_jobs -ge $max_jobs ]; then
@@ -2571,7 +2574,8 @@ check_all_updates_parallel() {
     local status="error"
     [ -f "$tmp_dir/$s" ] && status=$(cat "$tmp_dir/$s")
     if [ "$out_fmt" = "tsv" ]; then
-      printf '%s\t%s\n' "$s" "$status"
+      # Ya impreso al terminar; solo falta si la comprobación no llegó a escribir resultado
+      [ -f "$tmp_dir/$s" ] || printf '%s\terror\n' "$s"
       [ "$status" = "update" ] && UPDATABLE+=("$s")
       continue
     fi
@@ -2926,7 +2930,7 @@ show_help() {
   echo -e "  ${YELLOW}./update.sh -n [comando_docker_run]${NC}     Crear servicio interactivamente o desde comando."
   echo -e "  ${YELLOW}./update.sh --set-user-home <ruta>${NC}      Guardar nueva ruta de usuario persistente."
   echo -e "  ${YELLOW}./update.sh --list${NC}                       Listado de servicios en TSV (para scripts/panel web)."
-  echo -e "  ${YELLOW}./update.sh --check-tsv${NC}                  Comprobación de actualizaciones en TSV (carpeta, update|ok|error)."
+  echo -e "  ${YELLOW}./update.sh --check-tsv [svc...]${NC}         Comprobación de actualizaciones en TSV (carpeta, update|ok|error)."
   echo -e "  ${YELLOW}./update.sh --help | -?${NC}                  Mostrar esta ayuda."
   echo -e "================================================================================${NC}"
 }
@@ -3016,6 +3020,19 @@ elif [ "$1" = "--list" ]; then
   list_services_tsv
   exit 0
 elif [ "$1" = "--check-tsv" ]; then
+  # Opcional: solo las carpetas indicadas (nombres exactos)
+  shift
+  if [ $# -gt 0 ]; then
+    sel=()
+    for a in "$@"; do
+      if [[ " ${SERVICES[*]} " == *" $a "* ]]; then
+        sel+=("$a")
+      else
+        printf '%s\terror\n' "$a"
+      fi
+    done
+    SERVICES=("${sel[@]}")
+  fi
   check_all_updates_parallel tsv
   exit 0
 elif [ "$1" = "--show" ] || [ "$1" = "-s" ]; then

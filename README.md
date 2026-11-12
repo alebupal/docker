@@ -250,7 +250,7 @@ Puedes invocar todas las funciones directamente mediante argumentos para automat
 
 # Salidas en TSV para scripts y para el panel web Dockpanel (sin colores ni preguntas)
 ./update.sh --list        # carpeta, nombre, modo, puerto, RUNNING|STOPPED|OFFLINE, imagen, contenedor, backup
-./update.sh --check-tsv   # carpeta, update|ok|error
+./update.sh --check-tsv [svc...]  # carpeta, update|ok|error (cada línea en cuanto termina ese servicio)
 ```
 
 ---
