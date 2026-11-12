@@ -1087,6 +1087,7 @@ select_lifecycle_menu() {
     echo -e "  ${YELLOW}ra${NC}) 🔄 Reiniciar TODOS (restart-all)"
     echo -e "  ${YELLOW}ta${NC}) ⏹  Detener TODOS (stop-all)"
     echo -e "  ${YELLOW}pa${NC}) 🔁 Cambiar política de reinicio a TODOS (policy-all)"
+    echo -e "  ${YELLOW}ma${NC}) 📜 Mostrar comandos de arranque de TODOS (show-all)"
     echo ""
     echo -e "  ${GRAY}q) Volver al menú principal${NC}"
     echo "-----------------------------------------------------------"
@@ -1119,6 +1120,10 @@ select_lifecycle_menu() {
       pa|PA|policy-all|POLICY-ALL)
         target_services=("${SERVICES[@]}")
         direct_action="policy"
+        ;;
+      ma|MA|show-all|SHOW-ALL)
+        target_services=("${SERVICES[@]}")
+        direct_action="show"
         ;;
       a|A)
         target_services=("${SERVICES[@]}")
@@ -1158,6 +1163,7 @@ select_lifecycle_menu() {
     echo -e " 4) 🔨 Recrear contenedor / stack (en local, sin descargar)"
     echo -e " 5) 🚀 Actualizar imagen y desplegar (Pull desde internet)"
     echo -e " 6) 🔁 Cambiar política de reinicio (restart policy)"
+    echo -e " 7) 📜 Mostrar comando de arranque exacto (run / compose)"
     echo -e " q) Cancelar"
     read -rp "👉 Elige la acción: " ACT_OPT
 
@@ -1168,11 +1174,16 @@ select_lifecycle_menu() {
       4) act="recreate" ;;
       5) act="update" ;;
       6) act="policy" ;;
+      7) act="show" ;;
       *) echo "👋 Cancelado"; return 0 ;;
     esac
   fi
 
-  if [ "$act" = "update" ]; then
+  if [ "$act" = "show" ]; then
+    for s in "${target_services[@]}"; do
+      show_command "$s"
+    done
+  elif [ "$act" = "update" ]; then
     for s in "${target_services[@]}"; do
       update_service "$s" true false
     done
@@ -2885,9 +2896,9 @@ show_help() {
   echo -e "  ${GREEN}a${NC}      Actualizar TODOS los servicios configurados en el directorio."
   echo -e "  ${GREEN}c${NC}      Comprobar qué servicios tienen actualización remota (mediante SHA256 digest)."
   echo -e "         └─> Subopción ${YELLOW}u${NC}: Actualiza directamente y sin esperas los que tengan versión nueva."
-  echo -e "  ${GREEN}p${NC}      Ciclo de vida: Iniciar (start), detener (stop), reiniciar (restart) o recrear (recreate) contenedores."
+  echo -e "  ${GREEN}p${NC}      Ciclo de vida: Iniciar (start), detener (stop), reiniciar (restart), recrear (recreate) contenedores"
+  echo -e "         o mostrar el comando exacto de arranque (docker run o compose) de uno o de todos ('ma')."
   echo -e "  ${GREEN}m${NC}      Monitor de recursos: Muestra consumo de CPU, RAM, I/O de red y disco en tiempo real."
-  echo -e "  ${GREEN}s${NC}      Mostrar comandos: Imprime el comando exacto de arranque (docker run o compose)."
   echo -e "  ${GREEN}l${NC}      Ver logs: Inspecciona los últimos registros en vivo con seguimiento (tail -f)."
   echo -e "  ${GREEN}b${NC}      Mantenimiento y limpieza: Vacía logs, elimina backups antiguos y ejecuta prune."
   echo -e "  ${GREEN}n${NC}      Crear nuevo servicio: Asistente guiado o conversión automática desde 'docker run'."
@@ -2908,7 +2919,7 @@ show_help() {
   echo -e "  ${YELLOW}./update.sh --restart-policy <svc|all> <pol>${NC} Cambiar política de reinicio (unless-stopped|always|on-failure|no)."
   echo -e "  ${YELLOW}./update.sh -m | --stats${NC}                 Monitor de consumo de recursos en vivo."
   echo -e "  ${YELLOW}./update.sh -l | --logs <servicio>${NC}       Ver logs en tiempo real de un servicio."
-  echo -e "  ${YELLOW}./update.sh -s | --show${NC}                  Mostrar comandos de arranque de todos los servicios."
+  echo -e "  ${YELLOW}./update.sh -s | --show [svc...|all]${NC}    Mostrar comandos de arranque (de los indicados o de todos)."
   echo -e "  ${YELLOW}./update.sh -b | --clean${NC}                 Menú de limpieza y mantenimiento."
   echo -e "  ${YELLOW}./update.sh -k | --backup [servicio|all]${NC}   Crear copia de seguridad ahora (individual o todos)."
   echo -e "  ${YELLOW}./update.sh -r | --restore${NC}               Asistente de restauración de copias de seguridad."
@@ -3008,10 +3019,24 @@ elif [ "$1" = "--check-tsv" ]; then
   check_all_updates_parallel tsv
   exit 0
 elif [ "$1" = "--show" ] || [ "$1" = "-s" ]; then
-  for s in "${SERVICES[@]}"; do
-    show_command "$s"
+  shift
+  if [ $# -eq 0 ] || [ "$1" = "all" ]; then
+    for s in "${SERVICES[@]}"; do
+      show_command "$s"
+    done
+    exit 0
+  fi
+  show_rc=0
+  for arg in "$@"; do
+    resolved=$(resolve_service_input "$arg")
+    if [ -n "$resolved" ]; then
+      show_command "$resolved"
+    else
+      echo -e "${RED}❌ Servicio no encontrado: '$arg'${NC}"
+      show_rc=1
+    fi
   done
-  exit 0
+  exit $show_rc
 elif [ "$1" = "--all" ] || [ "$1" = "-a" ] || [ "$1" = "-fa" ] || [ "$1" = "-af" ]; then
   CLI_FORCE=false
   if [ "$1" = "-fa" ] || [ "$1" = "-af" ] || [ "$2" = "-f" ] || [ "$2" = "--force" ]; then
@@ -3083,13 +3108,12 @@ while true; do
     echo -e " ${YELLOW}a${NC}) ⬇️  Actualizar TODOS los servicios (Pull de imágenes y despliegue)"
     echo ""
     echo -e "${CYAN}── ⏯️ Control de Contenedores (Local) ──${NC}"
-    echo -e " ${YELLOW}p${NC}) 🕹️ Ciclo de Vida: Iniciar, Detener, Reiniciar o Recrear"
+    echo -e " ${YELLOW}p${NC}) 🕹️ Ciclo de Vida: Iniciar, Detener, Reiniciar, Recrear o ver comando de arranque"
     echo -e " ${YELLOW}1..N${NC}) 🎯 Número o nombre de un servicio → sus acciones (iniciar, detener, actualizar...)"
     echo ""
     echo -e "${CYAN}── 📊 Monitorización y Diagnóstico ──${NC}"
     echo -e " ${YELLOW}l${NC}) 📋 Ver logs de un servicio en vivo (tail -f)"
     echo -e " ${YELLOW}m${NC}) 📈 Monitor de recursos en tiempo real (docker stats)"
-    echo -e " ${YELLOW}s${NC}) 📜 Mostrar comandos de arranque exactos (run / compose)"
   else
     echo -e "${CYAN}── 📊 Monitorización ──${NC}"
     echo -e " ${YELLOW}m${NC}) 📈 Monitor de recursos en tiempo real (docker stats)"
@@ -3158,6 +3182,7 @@ while true; do
       docker image prune -f
       ;;
     s|S)
+      # Atajo heredado: ahora está en 'p' (acción 7 o 'ma' para todos)
       for s in "${SERVICES[@]}"; do
         show_command "$s"
       done

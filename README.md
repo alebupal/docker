@@ -142,13 +142,12 @@ Ejecuta el script sin parámetros para abrir la interfaz interactiva:
  a) ⬇️ Actualizar TODOS los servicios (Pull de imágenes y despliegue)
 
 ── ⏯️ Control de Contenedores (Local) ──
- p) 🕹️ Ciclo de Vida: Iniciar, Detener, Reiniciar o Recrear
+ p) 🕹️ Ciclo de Vida: Iniciar, Detener, Reiniciar, Recrear o ver comando de arranque
  1..N) 🎯 Número o nombre de un servicio → sus acciones (iniciar, detener, actualizar...)
 
 ── 📊 Monitorización y Diagnóstico ──
  l) 📋 Ver logs de un servicio en vivo (tail -f)
  m) 📈 Monitor de recursos en tiempo real (docker stats)
- s) 📜 Mostrar comandos de arranque exactos (run / compose)
 
 ── 🛠️ Administración y Mantenimiento ──
  n) ✨ Crear NUEVO servicio Docker (Asistente guiado)
@@ -226,8 +225,10 @@ Puedes invocar todas las funciones directamente mediante argumentos para automat
 # Ver logs en vivo de un servicio (tail -f)
 ./update.sh -l <servicio>   # o ./update.sh --logs <servicio>
 
-# Mostrar comandos de arranque de todos los servicios
-./update.sh -s        # o ./update.sh --show (valores sensibles enmascarados)
+# Mostrar comandos de arranque exactos (valores sensibles enmascarados)
+./update.sh -s                    # o ./update.sh --show / --show all: todos los servicios
+./update.sh -s portainer it_tools # solo los indicados
+# En el menú interactivo: 'p' → servicio → 7) Mostrar comando de arranque, o 'ma' para todos
 
 # Menú de limpieza y mantenimiento
 ./update.sh -b        # o ./update.sh --clean
