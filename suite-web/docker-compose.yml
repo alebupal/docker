@@ -1,6 +1,6 @@
 services:
   php:
-    image: php:8.3-fpm-alpine
+    image: php:8.5-fpm-alpine
     container_name: suite_php
     restart: always
     volumes:

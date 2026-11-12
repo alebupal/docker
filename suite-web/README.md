@@ -1,6 +1,6 @@
 # 🌐 Suite Web (Nginx + PHP-FPM)
 
-Stack ligero basado en **Nginx Alpine** y **PHP 8.3 FPM Alpine** que aloja utilidades y aplicaciones web propias del homelab bajo un único servicio unificado.
+Stack ligero basado en **Nginx Alpine** y **PHP 8.5 FPM Alpine** que aloja utilidades y aplicaciones web propias del homelab bajo un único servicio unificado.
 
 ---
 
@@ -16,7 +16,7 @@ Stack ligero basado en **Nginx Alpine** y **PHP 8.3 FPM Alpine** que aloja utili
 ## ⚙️ Arquitectura del Stack
 
 - **Contenedor Web (`suite_nginx`)**: `nginx:alpine` expuesto por defecto en el puerto `8080` (`${SUITE_PORT:-8080}:80`), con compresión `gzip`, soporte para subidas de hasta `128M` y página `404.html` personalizada.
-- **Contenedor PHP (`suite_php`)**: `php:8.3-fpm-alpine` conectado por red interna `suite_net` con límites ampliados en `php/uploads.ini`.
+- **Contenedor PHP (`suite_php`)**: `php:8.5-fpm-alpine` conectado por red interna `suite_net` con límites ampliados en `php/uploads.ini`.
 
 ---
 

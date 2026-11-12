@@ -120,7 +120,6 @@ function tmdbCurl($url, $headers = []) {
     $res = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $finalUrl = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
-    curl_close($ch);
     return ['body' => $res, 'status' => $httpCode, 'final_url' => $finalUrl];
 }
 
@@ -162,7 +161,6 @@ function tmdbCurlParallel($requests) {
             'status' => curl_getinfo($ch, CURLINFO_HTTP_CODE)
         ];
         curl_multi_remove_handle($mh, $ch);
-        curl_close($ch);
     }
     curl_multi_close($mh);
 
