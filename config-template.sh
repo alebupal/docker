@@ -44,7 +44,7 @@ VOLUMES="
 
 # Argumentos adicionales para docker run (opcional)
 EXTRA_ARGS="
---restart=always
+--restart unless-stopped
 "
 
 # Comando / Argumentos tras la imagen (opcional, ej: "--setup ejemplo" o "redis-server --appendonly yes")
@@ -68,4 +68,4 @@ EXTRA_ARGS="
 # COPIAS DE SEGURIDAD (BACKUP)
 # =============================================================================
 DO_BACKUP=false                      # true / false (realizar backup de volúmenes antes de actualizar)
-# BACKUP_DIR="$HOME/docker_backups" # Opcional: directorio donde se guardarán los backups
+# BACKUP_DIR="/ruta/backups/mi-servicio" # Opcional: sustituye solo para este servicio al global ($USER_HOME/docker_backups)

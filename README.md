@@ -15,11 +15,52 @@ docker/
 ├── update.sh               # 🚀 Script principal unificado (bucle interactivo + CLI)
 ├── config-template.sh      # 📄 Plantilla de referencia para nuevos servicios
 ├── README.md               # 📖 Documentación del gestor
+├── .github/workflows/
+│   └── shellcheck.yml      # CI: bash -n + shellcheck en cada push/PR a main
+├── .user_home              # (No versionado) Ruta base persistente (--set-user-home)
 │
 └── <nombre_servicio>/      # Carpeta para cada servicio gestionado
     ├── config.sh           # Configuración del servicio (MODE="run" o MODE="compose")
-    └── docker-compose.yml  # (Opcional) Solo requerido si MODE="compose"
+    ├── docker-compose.yml  # (Opcional) Solo requerido si MODE="compose"
+    └── .env                # (No versionado) Rutas personales y secretos
 ```
+
+---
+
+## 📦 Servicios Incluidos
+
+| Servicio | Carpeta | Modo | Imagen | Puerto(s) host |
+|---|---|---|---|---|
+| AceStream Scraper | `acestream-scraper` | compose | `pipepito/acestream-scraper:latest` | 8008 (UI), 8086, 8621, 43110-43111, 26552 |
+| AdGuard Home | `adguardhome` | compose | `adguard/adguardhome:latest` | 53, 3000, 8083, 853, 784/udp |
+| aMule | `amule` | compose | `ngosang/amule:latest` | 4711 (UI), 4712, 4662, 4665/udp, 4672/udp |
+| Backrest | `backrest` | compose | `ghcr.io/garethgeorge/backrest:latest` | 9898 |
+| BentoPDF | `bentopdf` | compose | `bentopdfteam/bentopdf:latest` | 3004 |
+| ConvertX | `convertx` | compose | `ghcr.io/c4illin/convertx:latest` | 3005 |
+| Downtify | `downtify` | run | `ghcr.io/henriquesebastiao/downtify:latest` | 8800 |
+| DuckDNS | `duckdns` | run | `lscr.io/linuxserver/duckdns:latest` | — |
+| FileBrowser Quantum | `filebrowser` | compose | `ghcr.io/gtsteffaniak/filebrowser:stable` | 8082 |
+| Homepage | `homepage` | run | `ghcr.io/gethomepage/homepage:latest` | 3002 |
+| Immich | `immich-app` | compose | `ghcr.io/immich-app/immich-server:release` (+ ML, Postgres, Valkey) | 2283 |
+| IT Tools | `it_tools` | run | `corentinth/it-tools:latest` | 8087 |
+| JDownloader 2 | `jdownloader-2` | run | `jlesage/jdownloader-2:latest` | 5800 |
+| Kutt | `kutt` | run | `kutt/kutt:latest` | 3003 |
+| Mealie | `mealie` | run | `ghcr.io/mealie-recipes/mealie:latest` | 9005 |
+| MeTube | `metube` | run | `ghcr.io/alexta69/metube` | 8081 |
+| MusicGrabber | `musicgrabber` | compose | `g33kphr33k/musicgrabber:latest` | 38274 |
+| NetAlertX | `netalertx` | compose | `ghcr.io/netalertx/netalertx:latest` | host (20211) |
+| Nginx Proxy Manager | `nginx-proxy-manager` | compose | `jc21/nginx-proxy-manager:latest` | 80, 443, 1000 (panel) |
+| PairDrop | `pairdrop` | run | `lscr.io/linuxserver/pairdrop:latest` | 3001 |
+| Portainer | `portainer` | run | `portainer/portainer-ce:latest` | 9000, 8000 |
+| Stirling PDF | `stirling_pdf` | run | `stirlingtools/stirling-pdf:latest` | 8085 |
+| Suite Web | `suite-web` | compose | `php:8.5-fpm-alpine` + `nginx:alpine` | 8080 (`SUITE_PORT`) |
+| Termix | `termix` | compose | `ghcr.io/termix-ssh/termix:latest` | 8088 |
+| Tinyauth | `tinyauth` | compose | `ghcr.io/tinyauthapp/tinyauth:v5` | 3006 |
+| Toolbox | `toolbox` | run | `alebupal/toolbox:latest` | host (8090) |
+| Tvheadend | `tvheadend` | run | `ghcr.io/linuxserver/tvheadend:latest` | host |
+| Tvspy | `tvspy` | run | `alebupal/tvspy:dev` | 32755 |
+| Vaultwarden | `vaultwarden` | run | `vaultwarden/server:latest` | 9158 |
+| WGDashboard | `wgdashboard` | compose | `ghcr.io/wgdashboard/wgdashboard:latest` | 10086, 51820/udp |
 
 ---
 
@@ -69,13 +110,14 @@ docker/
     - Si `DO_BACKUP=true`, realiza un backup comprimido `.tar.gz` antes de actualizar, con el contenedor/stack ya detenido (solo cuando realmente se va a recrear). Si la actualización falla, el backup se conserva.
     - Las rutas se guardan relativas a `/` (`tar -C /`) y se restauran en su ubicación original; los backups del formato antiguo se siguen detectando y restaurando.
     - Los volúmenes con nombre y los bind mounts externos (en compose) no se incluyen: el script avisa de ellos. En el backup manual (`k`) se ofrece detener temporalmente los servicios.
-    - **Restaurador integrado**: Permite listar e intentar restaurar backups desde `$HOME/docker_backups`.
+    - **Restaurador integrado**: Permite listar e intentar restaurar backups desde `$USER_HOME/docker_backups` (configurable con la variable `BACKUP_DIR`).
+    - **Retención automática**: al arrancar el script se eliminan los `.tar.gz` con más de 7 días de esa carpeta. El log de operaciones se guarda en `update-containers.log` dentro de ella.
 
 11. **🆕 Asistente y Generador Automático de Servicios**:
     - Generación automática pegando un comando `docker run` completo (se analiza sin ejecutar nada). Los volúmenes con ruta absoluta del host (`/mnt/...`, `/home/...`, `~/...`) conservan su ubicación real, pero esa ruta se guarda en el `.env` del servicio como `<SERVICIO>_<CARPETA>_DIR` y en `config.sh` queda `${VAR}`; los relativos, `$PWD` o volúmenes con nombre se mapean a `${USER_HOME}/config/<nombre del destino>` y el `.env` recibe `USER_HOME=<carpeta del servicio>`. Las variables `-e` sensibles (PASS, TOKEN, SECRET, KEY, HASH) también van al `.env`. Los argumentos con espacios se escriben entre comillas simples en `config.sh` (`-e 'MSG=hola mundo'`), y las variables del `.env` cuyo valor tiene espacios, comillas o `\` se pasan como `-e VAR` (docker toma el valor del `.env`, que se exporta). Así `config.sh` y `docker-compose.yml`, que son lo único que se versiona, no contienen rutas personales ni secretos. Lo mismo aplica al asistente paso a paso, y la plantilla de compose usa `${DATA_DIR}` definido en `.env`.
+    - Asistente guiado interactivo paso a paso para crear servicios `docker run` o `docker compose`.
 
 > **Convención de rutas:** el `.env` de cada servicio en modo `run` define `USER_HOME` como la carpeta del propio servicio, y su `config.sh` usa rutas cortas (`${USER_HOME}/config`). Como el `.env` se carga antes que `config.sh`, las rutas personales quedan solo en el `.env`.
-    - Asistente guiado interactivo paso a paso para crear servicios `docker run` o `docker compose`.
 
 ---
 
@@ -92,11 +134,11 @@ Ejecuta el script sin parámetros para abrir la interfaz interactiva:
 
 ```text
 ── 🚀 Actualizaciones (Internet) ──
- c) 🔍 Comprobar actualizaciones disponibles (SHA256 en paralelo)
+ c) 🔍 Comprobar actualizaciones disponibles (SHA256)
  a) ⬇️ Actualizar TODOS los servicios (Pull de imágenes y despliegue)
 
 ── ⏯️ Control de Contenedores (Local) ──
- p) 🕹️ Ciclo de Vida: Iniciar, Detener, Reiniciar, Recrear o Restart Policy
+ p) 🕹️ Ciclo de Vida: Iniciar, Detener, Reiniciar o Recrear
  1..N) 🎯 Número o nombre de un servicio → sus acciones (iniciar, detener, actualizar...)
 
 ── 📊 Monitorización y Diagnóstico ──
@@ -108,7 +150,7 @@ Ejecuta el script sin parámetros para abrir la interfaz interactiva:
  n) ✨ Crear NUEVO servicio Docker (Asistente guiado)
  b) 🧹 Limpieza y mantenimiento (Logs, Backups, Prune del sistema)
  k) 💾 Crear copia de seguridad ahora (individual o de TODOS)
- r) ⏪ Restaurar copia de seguridad (Rollback)
+ r) 💾 Restaurar copia de seguridad (Rollback)
  h) ⚙️ Configurar ruta base de usuario (actual: /home/usuario)
 
 ── ℹ️ Ayuda y Salida ──
@@ -140,9 +182,9 @@ Puedes invocar todas las funciones directamente mediante argumentos para automat
 
 ```bash
 # Pantalla de ayuda y documentación
-./update.sh --help    # o ./update.sh -?
+./update.sh --help    # o ./update.sh -?  /  ./update.sh help
 
-# Comprobar actualizaciones de todos los servicios (SHA256 en paralelo)
+# Comprobar actualizaciones de todos los servicios (SHA256 en paralelo; requiere docker buildx)
 ./update.sh -c        # o ./update.sh --check
 
 # Ciclo de vida para un servicio individual
@@ -156,26 +198,29 @@ Puedes invocar todas las funciones directamente mediante argumentos para automat
 ./update.sh --stop-all        # o ./update.sh --stop all
 ./update.sh --restart-all     # o ./update.sh --restart all
 ./update.sh --recreate-all    # o ./update.sh --recreate all
+# ⚠️ Sin <servicio>, --start/--stop/--restart/--recreate se aplican a TODOS los servicios.
 
 # Cambiar política de reinicio (unless-stopped | always | on-failure | no)
 ./update.sh --restart-policy <servicio> <politica>   # ej: ./update.sh -rp portainer unless-stopped
 ./update.sh --restart-policy all <politica>          # Aplicar a todos los servicios
 ./update.sh --policy <politica>                      # Atajo directo para aplicar a todos
+./update.sh -rp all                                  # Sin política: aplica unless-stopped
 
 # Actualizar todos los servicios de forma masiva (Pull + Deploy)
 ./update.sh -a        # o ./update.sh --all
-./update.sh -a -f     # Forzar además recreación de todos los servicios
+./update.sh -a -f     # Forzar además recreación de todos los servicios (o -fa / -af)
 
-# Actualizar un único servicio específico por su carpeta o índice
+# Actualizar un único servicio por su carpeta, índice o parte de su nombre
+# (si el texto coincide con varios servicios se usa el primero)
 ./update.sh <servicio>
-./update.sh -f <servicio>  # Forzar recreación
+./update.sh -f <servicio>  # Forzar recreación (o ./update.sh <servicio> -f / --force)
 # (no ejecuta 'docker image prune'; la limpieza se hace en las actualizaciones masivas o con -b)
 
 # Monitor de recursos en vivo (CPU / Memoria / Red)
 ./update.sh -m        # o ./update.sh --stats
 
 # Ver logs en vivo de un servicio (tail -f)
-./update.sh -l <servicio>
+./update.sh -l <servicio>   # o ./update.sh --logs <servicio>
 
 # Mostrar comandos de arranque de todos los servicios
 ./update.sh -s        # o ./update.sh --show (valores sensibles enmascarados)
@@ -192,7 +237,7 @@ Puedes invocar todas las funciones directamente mediante argumentos para automat
 ./update.sh -r        # o ./update.sh --restore
 
 # Crear nuevo servicio interactivamente o desde un comando 'docker run'
-./update.sh -n
+./update.sh -n            # o ./update.sh --new
 ./update.sh -n 'docker run -d -p 8080:80 --name mi_app nginx:alpine'
 
 # Configurar ruta base persistente del usuario
@@ -220,7 +265,7 @@ PORTS="
 "
 
 VOLUMES="
--v $PWD/data:/data
+-v ${USER_HOME}/data:/data
 "
 
 EXTRA_ARGS="
@@ -250,11 +295,13 @@ MODE="compose"
 IMAGE="mi_imagen:latest" # Opcional, para comprobaciones remotas de versión
 DO_BACKUP=false
 ```
-*(Nota: Para `MODE="compose"`, debe existir el archivo `docker-compose.yml` en la misma carpeta, definiendo su directiva `restart: unless-stopped`).*
+*(Nota: Para `MODE="compose"`, debe existir el archivo `docker-compose.yml` en la misma carpeta; se recomienda definir `restart: unless-stopped` en cada servicio. En modo `run`, si `EXTRA_ARGS` no incluye `--restart`, el script añade `--restart=unless-stopped`).*
+
+*`IMAGE` es la única imagen que vigila la comprobación de actualizaciones (`c`): en stacks con varias imágenes (p. ej. Suite Web vigila `nginx:alpine`), las demás solo se actualizan al hacer `a` o `./update.sh <servicio>`.*
 
 ### Etiquetas de imagen
 
-Los servicios usan etiquetas que avanzan solas (`latest`, o `release` en Immich), así que la comprobación (`c`) avisa cuando hay una imagen nueva y la actualización la descarga. Immich puede limitarse a una versión mayor con `IMMICH_VERSION=v3` en su `.env` (no se versiona): así recibe las actualizaciones de la v3 pero no salta a una v4 sin que lo cambies. Antes de actualizar servicios con base de datos (Immich, Vaultwarden) conviene revisar sus notas de versión y hacer backup (`k`).
+Casi todos los servicios usan `latest` (MeTube sin etiqueta, que equivale a `latest`). Excepciones: Immich `release`, FileBrowser `stable`, Tinyauth `v5` (fijada a la versión mayor 5) y Tvspy `dev`. Son etiquetas que avanzan solas, así que la comprobación (`c`) avisa cuando hay una imagen nueva y la actualización la descarga. Immich puede limitarse a una versión mayor con `IMMICH_VERSION=v3` en su `.env` (no se versiona): así recibe las actualizaciones de la v3 pero no salta a una v4 sin que lo cambies. Antes de actualizar servicios con base de datos (Immich, Vaultwarden) conviene revisar sus notas de versión y hacer backup (`k`).
 
 ---
 
@@ -346,7 +393,7 @@ Utilidades del servidor en un único contenedor (`alebupal/toolbox:latest`): exp
 - Actualizar servicio: `./update.sh toolbox`
 - Abrir menú CLI por SSH: `docker exec -it toolbox toolbox`
 - Consultar progreso/logs de la web por SSH: `docker exec -it toolbox toolbox web estado` y `docker exec -it toolbox toolbox web logs`
-- Ver ayuda detallada de todos los comandos SSH: `docker exec -it toolbox toolbox readme` o `../toolbox/README.md`.
+- Ver ayuda detallada de todos los comandos SSH: `docker exec -it toolbox toolbox readme` (el código y su README viven en el repositorio aparte `toolbox`).
 
 ## 📋 Requisitos del Sistema
 
@@ -354,3 +401,8 @@ El script verifica automáticamente la presencia de las herramientas necesarias 
 - `bash` (v4.0+)
 - `docker` & `docker compose`
 - `tar` & `gzip`
+- `docker buildx` (opcional, solo para comprobar actualizaciones con `c` / `--check`)
+
+## ✅ Integración Continua
+
+Cada push o PR a `main` ejecuta `.github/workflows/shellcheck.yml`: `bash -n` y `shellcheck -S warning` sobre `update.sh` y los `config.sh` de los servicios (en estos se ignora `SC2034`, porque sus variables se usan desde `update.sh`).
