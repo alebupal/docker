@@ -11,7 +11,7 @@ services:
       - PGID=1000
       - TZ=Europe/Madrid
       - JWT_SECRET=${JWT_SECRET}
-      - ACCOUNT_REGISTRATION=true
+      - ACCOUNT_REGISTRATION=false # sin registro de cuentas nuevas (las existentes siguen funcionando)
       - HTTP_ALLOWED=true
       - AUTO_DELETE_EVERY_N_HOURS=24
     volumes:
