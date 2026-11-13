@@ -22,4 +22,4 @@ EXTRA_ARGS="
 -e BASE_URL=${BASE_URL}
 "
 
-DO_BACKUP=false
+DO_BACKUP=true
