@@ -2469,8 +2469,11 @@ check_image_update() {
     return
   fi
 
-  local local_digest
-  local_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$img" 2>/dev/null | cut -d'@' -f2 || echo "none")
+  # Todos los digests locales de la imagen: una misma imagen puede tener varios (p. ej. nginx:alpine
+  # trae el de otra etiqueta con el mismo contenido) y el que coincide con el remoto no tiene por
+  # qué ser el primero. Comparar solo con RepoDigests[0] daba "actualización" para siempre.
+  local local_digests
+  local_digests=$(docker image inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' "$img" 2>/dev/null | cut -d'@' -f2)
 
   local remote_raw remote_digest
   if ! remote_raw=$(docker buildx imagetools inspect "$img" --format '{{json .Manifest.Digest}}' 2>/dev/null); then
@@ -2483,10 +2486,10 @@ check_image_update() {
     return
   fi
 
-  if [[ "$local_digest" != "$remote_digest" ]]; then
-    echo "update"
-  else
+  if grep -qxF "$remote_digest" <<< "$local_digests"; then
     echo "ok"
+  else
+    echo "update"
   fi
 }
 
