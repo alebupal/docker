@@ -2521,21 +2521,23 @@ check_update() {
     return
   fi
 
-  local has_update=false
   local has_error=false
+  local updated_imgs=()
 
   for img in "${images_to_check[@]}"; do
     local st
     st=$(check_image_update "$img")
     if [ "$st" = "update" ]; then
-      has_update=true
+      updated_imgs+=("$img")
     elif [ "$st" = "error" ]; then
       has_error=true
     fi
   done
 
-  if [ "$has_update" = true ]; then
+  # Primera línea: estado. Segunda (solo con actualización): imágenes con versión nueva, separadas por comas
+  if [ ${#updated_imgs[@]} -gt 0 ]; then
     echo "update"
+    (IFS=,; echo "${updated_imgs[*]}")
   elif [ "$has_error" = true ]; then
     echo "error"
   else
@@ -2558,10 +2560,18 @@ check_all_updates_parallel() {
 
   for s in "${SERVICES[@]}"; do
     (
-      st=$(check_update "$s")
+      res=$(check_update "$s")
+      st=${res%%$'\n'*}
+      imgs=""
+      [[ $res == *$'\n'* ]] && imgs=${res#*$'\n'}
       echo "$st" > "$tmp_dir/$s"
-      # Línea corta escrita de una vez: no se mezcla con la de otros procesos en paralelo
-      [ "$out_fmt" = "tsv" ] && printf '%s\t%s\n' "$s" "$st"
+      [ -n "$imgs" ] && echo "$imgs" > "$tmp_dir/$s.imgs"
+      # Líneas cortas escritas de una vez: no se mezclan con las de otros procesos en paralelo.
+      # La de imágenes va antes que la del estado; los lectores antiguos la ignoran (estado desconocido).
+      if [ "$out_fmt" = "tsv" ]; then
+        [ -n "$imgs" ] && printf '%s\timages\t%s\n' "$s" "$imgs"
+        printf '%s\t%s\n' "$s" "$st"
+      fi
     ) &
     ((current_jobs++))
     if [ $current_jobs -ge $max_jobs ]; then
@@ -2584,7 +2594,9 @@ check_all_updates_parallel() {
     fi
     case "$status" in
       update)
-        echo -e " 🟢 ${GREEN}$NAME ($s)${NC} → ¡Actualización disponible!"
+        local imgs_txt=""
+        [ -f "$tmp_dir/$s.imgs" ] && imgs_txt=" ${GRAY}($(sed 's/,/, /g' "$tmp_dir/$s.imgs"))${NC}"
+        echo -e " 🟢 ${GREEN}$NAME ($s)${NC} → ¡Actualización disponible!${imgs_txt}"
         UPDATABLE+=("$s")
         ;;
       ok)
@@ -2933,7 +2945,7 @@ show_help() {
   echo -e "  ${YELLOW}./update.sh -n [comando_docker_run]${NC}     Crear servicio interactivamente o desde comando."
   echo -e "  ${YELLOW}./update.sh --set-user-home <ruta>${NC}      Guardar nueva ruta de usuario persistente."
   echo -e "  ${YELLOW}./update.sh --list${NC}                       Listado de servicios en TSV (para scripts/panel web)."
-  echo -e "  ${YELLOW}./update.sh --check-tsv [svc...]${NC}         Comprobación de actualizaciones en TSV (carpeta, update|ok|error)."
+  echo -e "  ${YELLOW}./update.sh --check-tsv [svc...]${NC}         Comprobación de actualizaciones en TSV (carpeta, update|ok|error; con actualización, antes «carpeta images img1,img2»)."
   echo -e "  ${YELLOW}./update.sh --help | -?${NC}                  Mostrar esta ayuda."
   echo -e "================================================================================${NC}"
 }
