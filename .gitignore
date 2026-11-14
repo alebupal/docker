@@ -27,6 +27,8 @@ suite-web/www/generarPoster/cover/*.pdf
 suite-web/www/descargas/descargas/
 suite-web/www/descargas/tree.json
 suite-web/www/descargas/tree-data.js
+suite-web/www/descargas/.tree.lock
+suite-web/www/descargas/*.tmp
 
 # =============================================================================
 # 3. Archivos ocultos y temporales en la raíz

@@ -6,6 +6,10 @@
 
 $rootDir = __DIR__;
 
+// Segundos durante los que se reutiliza el último escaneo (tree.json) en lugar de recorrer
+// todo el árbol en cada visita. El botón «Actualizar» de la web fuerza un escaneo nuevo.
+const TREE_TTL_SECONDS = 30;
+
 function formatBytes($bytes) {
     if ($bytes >= 1073741824) return number_format($bytes / 1073741824, 2) . ' GB';
     if ($bytes >= 1048576) return number_format($bytes / 1048576, 2) . ' MB';
@@ -170,15 +174,66 @@ function generarArbolDescargas() {
 
     $jsonStr = json_encode($tree, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
-    // Guardar respaldo en disco
-    @file_put_contents($rootDir . '/tree.json', $jsonStr);
-    @file_put_contents($rootDir . '/tree-data.js', "window.TREE_DATA = " . $jsonStr . ";\n");
+    // Guardar respaldo en disco (escritura atómica: nunca se sirve un fichero a medias)
+    escribirAtomico($rootDir . '/tree.json', $jsonStr);
+    escribirAtomico($rootDir . '/tree-data.js', "window.TREE_DATA = " . $jsonStr . ";\n");
 
     return [$tree, $jsonStr];
 }
 
-// Ejecución
-[$tree, $jsonStr] = generarArbolDescargas();
+function escribirAtomico(string $path, string $data): void {
+    $tmp = $path . '.' . getmypid() . '.tmp';
+    if (@file_put_contents($tmp, $data) !== false && @rename($tmp, $path)) {
+        return;
+    }
+    @unlink($tmp);
+    // Sin permiso para crear ficheros en la carpeta (solo para reescribir los existentes):
+    // escritura directa con bloqueo, como en versiones anteriores
+    @file_put_contents($path, $data, LOCK_EX);
+}
+
+/**
+ * Devuelve [árbol, json]: el último escaneo si tiene menos de TREE_TTL_SECONDS y no se fuerza,
+ * o un escaneo nuevo. Si otra petición ya está escaneando, se usa el último escaneo guardado.
+ */
+function obtenerArbol(bool $forzar = false): array {
+    global $rootDir;
+    $cache = $rootDir . '/tree.json';
+    $leerCache = function () use ($cache): ?array {
+        $json = @file_get_contents($cache);
+        $tree = $json !== false ? json_decode($json, true) : null;
+        return is_array($tree) ? [$tree, $json] : null;
+    };
+
+    if (!$forzar && is_file($cache) && time() - (int) @filemtime($cache) < TREE_TTL_SECONDS) {
+        $hit = $leerCache();
+        if ($hit) return $hit;
+    }
+
+    $lock = @fopen($rootDir . '/.tree.lock', 'c');
+    if ($lock && !flock($lock, LOCK_EX | LOCK_NB)) {
+        // Otro proceso está escaneando: esperar a que termine y usar su resultado
+        flock($lock, LOCK_EX);
+        flock($lock, LOCK_UN);
+        fclose($lock);
+        $hit = $leerCache();
+        if ($hit) return $hit;
+        return generarArbolDescargas();
+    }
+    try {
+        return generarArbolDescargas();
+    } finally {
+        if ($lock) {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    }
+}
+
+// Ejecución (?force=1 = escaneo nuevo, lo usa el botón «Actualizar»). Desde fuera de la red local
+// (SUITE_IS_LAN=0, lo pasa nginx) no se fuerza: se respeta la caché para que no se pueda saturar.
+$puedeForzar = php_sapi_name() === 'cli' || ($_SERVER['SUITE_IS_LAN'] ?? '1') === '1';
+[$tree, $jsonStr] = obtenerArbol(php_sapi_name() === 'cli' || ($puedeForzar && !empty($_GET['force'])));
 
 // Si es llamado directamente como API vía HTTP o AJAX
 if (isset($_GET['api']) || (php_sapi_name() !== 'cli' && basename($_SERVER['SCRIPT_FILENAME'] ?? '') === 'actualizar_arbol.php')) {

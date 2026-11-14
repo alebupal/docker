@@ -229,9 +229,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const urlParts = url.split('/').pop().split('?')[0] || 'Poster_Web';
             setImageSource(img, urlParts);
         } catch {
-            // Si falla por CORS, intentamos a través de un proxy CORS seguro
+            // Si falla por CORS, se descarga a través del proxy propio del servidor (api_imagen.php,
+            // solo imágenes públicas y solo desde la red local); ninguna URL sale a servicios externos
             try {
-                const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url.trim())}`;
+                const proxyUrl = `api_imagen.php?url=${encodeURIComponent(url.trim())}`;
                 const imgProxy = await tryLoadImage(proxyUrl);
                 const urlParts = url.split('/').pop().split('?')[0] || 'Poster_Web';
                 setImageSource(imgProxy, urlParts);
@@ -2484,7 +2485,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     showToast(`Póster cargado y ajustado: ${currentTmdbData.display_name || currentTmdbData.title}`, 'success');
                 } catch {
                     try {
-                        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(p.original_url)}`;
+                        const proxyUrl = `api_imagen.php?url=${encodeURIComponent(p.original_url)}`;
                         const imgProxy = await tryLoadImage(proxyUrl);
                         setImageSource(imgProxy, currentTmdbData.display_name || currentTmdbData.title);
                         showToast(`Póster cargado y ajustado`, 'success');

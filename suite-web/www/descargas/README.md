@@ -7,7 +7,7 @@ Aplicación web ligera en **PHP, JavaScript Vanilla y CSS3** para explorar direc
 ## ✨ Características Principales
 
 - **🌳 Árbol de Directorios Dinámico**:
-  - Escaneo recursivo automático en cada visita o bajo demanda mediante el botón **Actualizar** (`actualizar_arbol.php?api=1`).
+  - Escaneo recursivo al visitar la página, reutilizando el último durante **30 segundos** (`TREE_TTL_SECONDS` en `actualizar_arbol.php`) para no recorrer todo el árbol en cada visita; el botón **Actualizar** fuerza un escaneo nuevo (`actualizar_arbol.php?api=1&force=1`, solo desde la red local). Dos escaneos simultáneos no se pisan (bloqueo `.tree.lock`) y `tree.json` / `tree-data.js` se escriben de forma atómica.
   - Panel lateral navegable con botones para expandir o colapsar todas las ramas del árbol.
 - **🔍 Búsqueda Global Instantánea**:
   - Filtra archivos y carpetas en tiempo real en todo el árbol sin necesidad de recargar la página.
@@ -42,5 +42,5 @@ descargas/
    ```text
    http://<ip-servidor>:${SUITE_PORT:-8080}/descargas/
    ```
-3. El índice de archivos se actualiza automáticamente al cargar la página o pulsando el botón **Actualizar** de la barra superior.
+3. El índice de archivos se actualiza al cargar la página (como mucho con 30 s de retraso) o al momento pulsando el botón **Actualizar** de la barra superior.
 

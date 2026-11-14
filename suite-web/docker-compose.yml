@@ -8,6 +8,13 @@ services:
       - ./php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
     networks:
       - suite_net
+    healthcheck:
+      # PHP-FPM escuchando en el 9000 (la imagen no trae cgi-fcgi para un ping FastCGI completo)
+      test: ["CMD", "php", "-r", "exit(@fsockopen('127.0.0.1', 9000) ? 0 : 1);"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   nginx:
     image: nginx:alpine
@@ -19,9 +26,17 @@ services:
       - ./www:/var/www/html:ro
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      - php
+      php:
+        condition: service_healthy
     networks:
       - suite_net
+    healthcheck:
+      # Portal servido por nginx (estático: no depende de PHP)
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 networks:
   suite_net:

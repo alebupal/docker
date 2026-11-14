@@ -372,14 +372,14 @@
 
   <!-- Contenedor Principal de Error 404 / Selector -->
   <main class="error-container">
-    <div class="badge-chip">
+    <div class="badge-chip" id="errChip">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
       <span>Ruta no encontrada</span>
     </div>
 
-    <div class="error-number">404</div>
-    <h2 class="error-title">No hemos encontrado esta página</h2>
-    <p class="error-subtitle">La ruta que intentas visitar no existe o no tiene un archivo asignado. Selecciona cualquiera de las herramientas disponibles para comenzar:</p>
+    <div class="error-number" id="errNumber">404</div>
+    <h2 class="error-title" id="errTitle">No hemos encontrado esta página</h2>
+    <p class="error-subtitle" id="errSubtitle">La ruta que intentas visitar no existe o no tiene un archivo asignado. Selecciona cualquiera de las herramientas disponibles para comenzar:</p>
 
     <div class="apps-section-title">Aplicaciones activas en el servidor</div>
 
@@ -455,6 +455,20 @@
       localStorage.setItem('suite_theme', newTheme);
       updateThemeUI(newTheme);
     });
+  </script>
+  <script>
+    // Esta página es a la vez el portal (raíz) y la página de error 404 de nginx
+    (function () {
+      var p = location.pathname;
+      if (p !== '/' && p !== '/index.html') return;
+      document.title = 'Suite Web | Aplicaciones';
+      ['errChip', 'errNumber'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = "none";
+      });
+      document.getElementById('errTitle').textContent = '¿Qué quieres hacer?';
+      document.getElementById('errSubtitle').textContent = 'Herramientas web alojadas en este servidor.';
+    })();
   </script>
 </body>
 </html>

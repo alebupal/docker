@@ -43,7 +43,8 @@ document.addEventListener('DOMContentLoaded', () => {
             btnRefreshTree.classList.add('loading');
         }
 
-        const url = 'actualizar_arbol.php?api=1&_t=' + Date.now();
+        // Manual = escaneo nuevo; al cargar se reutiliza el último escaneo reciente del servidor
+        const url = 'actualizar_arbol.php?api=1' + (manual ? '&force=1' : '') + '&_t=' + Date.now();
         fetch(url, {
             cache: 'no-store',
             headers: {
