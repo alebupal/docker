@@ -47,6 +47,7 @@ docker/
 | JDownloader 2 | `jdownloader-2` | run | `jlesage/jdownloader-2:latest` | 5800 |
 | Kutt | `kutt` | run | `kutt/kutt:latest` | 3003 |
 | Mealie | `mealie` | run | `ghcr.io/mealie-recipes/mealie:latest` | 9005 |
+| Mealie Importer | `mealie-importer` | run | `alebupal/mealie-importer:latest` | 8094 |
 | MeTube | `metube` | run | `ghcr.io/alexta69/metube` | 8081 |
 | MusicGrabber | `musicgrabber` | compose | `g33kphr33k/musicgrabber:latest` | 38274 |
 | NetAlertX | `netalertx` | compose | `ghcr.io/netalertx/netalertx:latest` | host (20211) |
