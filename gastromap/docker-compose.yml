@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-gastromap}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gastromap_secret}
     volumes:
-      - ${USER_HOME}/data/pgdata:/var/lib/postgresql/data
+      - ./data/pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gastromap} -d ${POSTGRES_DB:-gastromap}"]
       interval: 5s
@@ -20,7 +20,7 @@ services:
     container_name: gastromap_app
     restart: unless-stopped
     ports:
-      - "${PORT:-3007}:3000"
+      - "3007:3000"
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER:-gastromap}:${POSTGRES_PASSWORD:-gastromap_secret}@db:5432/${POSTGRES_DB:-gastromap}
