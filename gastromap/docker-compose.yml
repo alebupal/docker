@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: gastromap_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gastromap}
+      POSTGRES_USER: ${POSTGRES_USER:-gastromap}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gastromap_secret}
+    volumes:
+      - ${USER_HOME}/data/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gastromap} -d ${POSTGRES_DB:-gastromap}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: alebupal/gastromap:latest
+    container_name: gastromap_app
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3007}:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-gastromap}:${POSTGRES_PASSWORD:-gastromap_secret}@db:5432/${POSTGRES_DB:-gastromap}
+      SESSION_SECRET: ${SESSION_SECRET:-desarrollo_secreto_cambiar_min_32_chars}
+      PORT: 3000
+    depends_on:
+      db:
+        condition: service_healthy

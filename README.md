@@ -41,6 +41,7 @@ docker/
 | Downtify | `downtify` | run | `ghcr.io/henriquesebastiao/downtify:latest` | 8800 |
 | DuckDNS | `duckdns` | run | `lscr.io/linuxserver/duckdns:latest` | — |
 | FileBrowser Quantum | `filebrowser` | compose | `ghcr.io/gtsteffaniak/filebrowser:stable` | 8082 |
+| GastroMap | `gastromap` | compose | `alebupal/gastromap:latest` (+ PostGIS 16) | 3007 |
 | Homepage | `homepage` | run | `ghcr.io/gethomepage/homepage:latest` | 3002 |
 | Immich | `immich-app` | compose | `ghcr.io/immich-app/immich-server:v3` (+ ML, Postgres, Valkey) | 2283 |
 | IT Tools | `it_tools` | run | `corentinth/it-tools:latest` | 8087 |
