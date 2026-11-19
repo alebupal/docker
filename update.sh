@@ -356,22 +356,37 @@ get_service_port() {
   local dc_file="$BASE_DIR/$service/docker-compose.yml"
   local env_file="$BASE_DIR/$service/.env"
 
+  # 1. Chequeo de variables explícitas WEB_PORT o PORT en config.sh y .env
   if [ -f "$cfg_file" ]; then
-    port=$(grep -E '^[[:space:]]*-p[[:space:]]+[0-9]+' "$cfg_file" 2>/dev/null | head -n 1 | awk '{print $2}' | cut -d: -f1)
-  fi
-  if [ -z "$port" ] && [ -f "$dc_file" ]; then
-    port=$(grep -E '^[[:space:]]*-[[:space:]]*["0-9]+:[0-9]+' "$dc_file" 2>/dev/null | head -n 1 | sed -E 's/[^0-9]*([0-9]+):.*/\1/')
-  fi
-  # Contenedores en modo host (--network host / network_mode: host) sin mapeo -p/ports:
-  if [ -z "$port" ] && [ -f "$cfg_file" ] && grep -qE -- '--network[[:space:]=]+host' "$cfg_file" 2>/dev/null; then
-    port=$(grep -E "^[[:space:]]*(-e[[:space:]]+['\"]?PORT=|WEB_PORT=)[0-9]+" "$cfg_file" 2>/dev/null | head -n 1 | sed -E 's/.*=([0-9]+).*/\1/')
-  fi
-  if [ -z "$port" ] && [ -f "$dc_file" ] && grep -qE 'network_mode:[[:space:]]*host' "$dc_file" 2>/dev/null; then
-    port=$(grep -E '^[[:space:]]*-[[:space:]]*PORT=[0-9]+' "$dc_file" 2>/dev/null | head -n 1 | sed -E 's/.*=([0-9]+).*/\1/')
+    port=$(grep -E '^[[:space:]]*(export[[:space:]]+)?(WEB_PORT|PORT)=["'\'']?[0-9]+' "$cfg_file" 2>/dev/null | head -n 1 | sed -E 's/.*=["'\'']?([0-9]+).*/\1/')
   fi
   if [ -z "$port" ] && [ -f "$env_file" ]; then
-    port=$(grep -E '^[[:space:]]*WEB_PORT=[0-9]+' "$env_file" 2>/dev/null | head -n 1 | sed -E 's/.*=([0-9]+).*/\1/')
+    port=$(grep -E '^[[:space:]]*(WEB_PORT|PORT)=["'\'']?[0-9]+' "$env_file" 2>/dev/null | head -n 1 | sed -E 's/.*=["'\'']?([0-9]+).*/\1/')
   fi
+
+  # 2. Argumento -p en config.sh (docker run)
+  if [ -z "$port" ] && [ -f "$cfg_file" ]; then
+    port=$(grep -E '^[[:space:]]*-p[[:space:]]+[0-9]+' "$cfg_file" 2>/dev/null | head -n 1 | awk '{print $2}' | cut -d: -f1)
+  fi
+
+  # 3. docker-compose.yml: Si tiene puerto web admin específico (ej: 81 para Nginx Proxy Manager)
+  if [ -z "$port" ] && [ -f "$dc_file" ]; then
+    port=$(grep -E '^[[:space:]]*-[[:space:]]*["'\'']?(\$\{?[^:}]*:-)?([0-9]+)\}?["'\'']?:81' "$dc_file" 2>/dev/null | head -n 1 | sed -E -n 's/^[[:space:]]*-[[:space:]]*["'\'']?(\$\{?[^:}]*:-)?([0-9]+).*/\2/p')
+  fi
+
+  # 4. docker-compose.yml: Mapeo de puertos estándar, con soporte para comillas simples/dobles y variables ${VAR:-PORT}
+  if [ -z "$port" ] && [ -f "$dc_file" ]; then
+    port=$(grep -E '^[[:space:]]*-[[:space:]]*["'\'']?(\$\{?[^:}]*:-)?([0-9]+)\}?["'\'']?:[0-9]+' "$dc_file" 2>/dev/null | head -n 1 | sed -E -n 's/^[[:space:]]*-[[:space:]]*["'\'']?(\$\{?[^:}]*:-)?([0-9]+).*/\2/p')
+  fi
+
+  # 5. Contenedores en modo host (--network host / network_mode: host) sin mapeo -p/ports
+  if [ -z "$port" ] && [ -f "$cfg_file" ] && grep -qE -- '--network[[:space:]=]+host' "$cfg_file" 2>/dev/null; then
+    port=$(grep -E "^[[:space:]]*(-e[[:space:]]+['\"]?(WEB_PORT|PORT)=)[0-9]+" "$cfg_file" 2>/dev/null | head -n 1 | sed -E 's/.*=([0-9]+).*/\1/')
+  fi
+  if [ -z "$port" ] && [ -f "$dc_file" ] && grep -qE 'network_mode:[[:space:]]*host' "$dc_file" 2>/dev/null; then
+    port=$(grep -E '^[[:space:]]*-[[:space:]]*(WEB_PORT|PORT)=[0-9]+' "$dc_file" 2>/dev/null | head -n 1 | sed -E 's/.*=([0-9]+).*/\1/')
+  fi
+
   if [ -n "$port" ]; then
     echo ":$port"
   else

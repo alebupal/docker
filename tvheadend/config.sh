@@ -5,6 +5,7 @@ MODE="run"
 
 CONTAINER_NAME="tvheadend"
 IMAGE="ghcr.io/linuxserver/tvheadend:latest"
+WEB_PORT="9981"
 
 PORTS=""
 VOLUMES="
